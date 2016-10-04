@@ -1,0 +1,509 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Sep  1 16:54:39 2016
+
+@author: adelpret
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Aug 30 16:34:13 2016
+
+@author: adelpret
+"""
+
+from polytope_conversion_utils import crossMatrix, cone_span_to_face, eliminate_redundant_inequalities
+from geom_utils import is_vector_inside_cone, plot_inequalities
+from transformations import euler_matrix
+
+import plot_utils as plut
+import matplotlib.pyplot as plt
+from math import atan, pi
+
+import numpy as np
+from numpy.random import uniform
+from numpy import sqrt
+import cProfile
+
+EPS = 1e-5;
+
+def find_static_equilibrium_com(mass, com_lb, com_ub, H, h, MAX_ITER=1000):
+    FOUND_STATIC_COM = False;
+    g_vector = np.array([0,0,-9.81]);
+    w = np.zeros(6);
+    w[2] = -mass*9.81;
+    i = 0;
+    while(not FOUND_STATIC_COM):
+        #STEVE: consider actual bounds on contact points
+        c0 = np.array([np.random.uniform(com_lb[j], com_ub[j]) for j in range(3)]);
+        w[3:] = mass*np.cross(c0, g_vector);
+        FOUND_STATIC_COM = np.max(np.dot(H, w) - h) <= 1e-12;
+        i += 1;
+        if(i>=MAX_ITER):
+            print "ERROR: Could not find com position in static equilibrium in %d iterations."%MAX_ITER;
+            return (False,c0);
+    return (True,c0);
+
+''' Generate the 4 contact points and the associated normal directions
+    for a rectangular contact.
+'''    
+def generate_rectangle_contacts(lx, ly, pos, rpy):
+    # contact points in local frame
+    p = np.array([[ lx,  ly, 0],
+               [ lx, -ly, 0],
+               [-lx, -ly, 0],
+               [-lx,  ly, 0]]);
+    # normal direction in local frame
+    n  = np.array([0, 0, 1]);
+    # compute rotation matrix
+    R = euler_matrix(rpy[0], rpy[1], rpy[2], 'sxyz');
+    R = R[:3,:3];
+    # contact points in world frame
+    p[0,:] = pos.reshape(3) + np.dot(R,p[0,:]);
+    p[1,:] = pos.reshape(3) + np.dot(R,p[1,:]);
+    p[2,:] = pos.reshape(3) + np.dot(R,p[2,:]);
+    p[3,:] = pos.reshape(3) + np.dot(R,p[3,:]);
+    # normal directions in world frame
+    n  = np.dot(R,n);
+    N = np.vstack([n, n, n, n]);
+    return (p,N);
+
+''' Generate the contact points and the contact normals associated to randomly generated rectangular contact surfaces
+'''
+def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS=False):
+    contact_pos = np.zeros((N_CONTACTS, 3));
+    contact_rpy = np.zeros((N_CONTACTS, 3));
+    p = np.zeros((4*N_CONTACTS,3)); # contact points
+    N = np.zeros((4*N_CONTACTS,3)); # contact normals
+    g_vector = np.array([0, 0, -9.81]);
+    
+    ''' Generate contact positions and orientations '''
+    for i in range(N_CONTACTS):
+        while True:
+            contact_pos[i,:] = uniform(CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS);      # contact position
+            collision = False;
+            for j in range(i-1):
+                if(np.linalg.norm(contact_pos[i,:]-contact_pos[j,:])<MIN_CONTACT_DISTANCE):
+                    collision = True;
+            if(collision==False):
+                break;
+        
+        while True:
+            contact_rpy[i,:] = uniform(RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS);      # contact orientation
+            (p[i*4:i*4+4,:],N[i*4:i*4+4,:]) = generate_rectangle_contacts(lx, ly, contact_pos[i,:], contact_rpy[i,:].T);
+            if(GENERATE_QUASI_FLAT_CONTACTS==False or is_vector_inside_cone(-g_vector, mu, N[i*4,:].T)):
+                break;
+    return (p, N);
+
+''' Compute the gravito-inertial wrench cone.
+    @param contact_points Nx3 matrix containing the contact points
+    @param contact_normals Nx3 matrix containing the contact normals
+    @param mu Friction coefficient
+    @param cg Number of generator for the friction cone of each contact point
+    @param USE_DIAGONAL_GENERATORS If True generate the generators turned of 45 degrees
+    @return (H,h) Matrix and vector defining the GIWC as H*w <= h
+'''
+def compute_GIWC(contact_points, contact_normals, mu, cg=4, eliminate_redundancies=False, USE_DIAGONAL_GENERATORS=True):
+    ''' compute generators '''
+    nContacts = contact_points.shape[0];
+    #gamma = atan(mu);   # half friction cone angle
+    nGen = nContacts*cg;           # number of generators
+    S = np.zeros((3,nGen));
+    T1 = np.zeros((nContacts,3));
+    T2 = np.zeros((nContacts,3));
+    muu = mu/sqrt(2);
+    for i in range(nContacts):
+        ''' compute tangent directions '''
+        contact_normals[i,:]  = contact_normals[i,:]/np.linalg.norm(contact_normals[i,:]);
+        T1[i,:] = np.cross(contact_normals[i,:], [0,1,0]);
+        if(np.linalg.norm(T1[i,:])<1e-5):
+            T1[i,:] = np.cross(contact_normals[i,:], [1,0,0]);
+        T1[i,:] = T1[i,:]/np.linalg.norm(T1[i,:]);
+        T2[i,:] = np.cross(contact_normals[i,:], T1[i,:]);
+        T2[i,:] = T2[i,:]/np.linalg.norm(T2[i,:]);
+        
+        if(USE_DIAGONAL_GENERATORS):
+            S[:,cg*i+0] =  muu*T1[i,:] + muu*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+1] =  muu*T1[i,:] - muu*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+2] = -muu*T1[i,:] + muu*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+3] = -muu*T1[i,:] - muu*T2[i,:] + contact_normals[i,:];
+        else:
+            S[:,cg*i+0] =   mu*T1[i,:] + contact_normals[i,:];
+            S[:,cg*i+1] =  -mu*T1[i,:] + contact_normals[i,:];
+            S[:,cg*i+2] =   mu*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+3] = - mu*T2[i,:] + contact_normals[i,:];
+        
+        S[:,cg*i+0] = S[:,cg*i+0]/np.linalg.norm(S[:,cg*i+0]);
+        S[:,cg*i+1] = S[:,cg*i+1]/np.linalg.norm(S[:,cg*i+1]);
+        S[:,cg*i+2] = S[:,cg*i+2]/np.linalg.norm(S[:,cg*i+2]);
+        S[:,cg*i+3] = S[:,cg*i+3]/np.linalg.norm(S[:,cg*i+3]);
+    
+    ''' compute matrix mapping contact forces to gravito-inertial wrench '''
+    M = np.zeros((6,3*nContacts));
+    for i in range(nContacts):
+        M[:3, 3*i:3*i+3] = -np.identity(3);
+        M[3:, 3*i:3*i+3] = -crossMatrix(contact_points[i,:]);
+        
+    ''' project generators in 6d centroidal space '''
+    S_centr = np.zeros((6,nGen));
+    for i in range(nContacts):
+        S_centr[:,cg*i:cg*i+cg] = np.dot(M[:,3*i:3*i+3], S[:,cg*i:cg*i+cg]);
+    ''' convert generators to inequalities '''
+    H = cone_span_to_face(S_centr,eliminate_redundancies);
+    h = np.zeros(H.shape[0]);
+    return (H,h);
+    
+    
+''' Compute the inequalities A*x<=b defining the polytope of feasible CoM accelerations
+    assuming zero rate of change of angular momentum.
+    @param c0 Current com position
+    @param H Matrix of GIWC, which can be computed by compute_GIWC
+    @param h Vector of GIWC, which can be computed by compute_GIWC
+    @param mass Mass of the system in Kg
+    @param g_vector Gravity vector
+    @return (A,b)
+'''
+def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_redundant_ineq=True):
+    K = np.zeros((6,3));
+    K[:3,:] = mass*np.identity(3);
+    K[3:,:] = mass*crossMatrix(com_pos);
+    b = h - np.dot(H,np.dot(K,g_vector)); #constant term of F
+    A = np.dot(-H,K); #matrix multiplying com acceleration 
+    if(eliminate_redundant_ineq):
+        (A,b) = eliminate_redundant_inequalities(A,b);
+    return A,b;
+    
+
+''' MULTI-CONTACT BALANCE (can I stop?)
+    Input: initial CoM position c0, initial CoM velocity dc0, contact points, contact normals, friction coefficient mu, T_0=1
+    Output: (True, c_final) or (False, None)
+    Steps:
+        - Compute GIWC: H*w <= h, where w=(m*(g-ddc), m*cx(g-ddc))
+        - Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=-DDalpha*v, v=dc0/||dc0||: A*(alpha,DDalpha)<=b
+        - Find ordered (left-most first, clockwise) vertices of 2d polytope A*(alpha,DDalpha)<=b: V
+        - Initialize: alpha=0, Dalpha=||dc0||
+        - LOOP:
+            - Find current active inequality: a*alpha + b*DDalpha <= d (i.e. DDalpha upper bound for current alpha value)
+            - If DDalpha_upper_bound<0: return False
+            - Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
+            - Initialize: t=T_0, t_ub=10, t_lb=0
+            LOOP:
+                - Integrate LDS until t: DDalpha = d/b - (a/d)*alpha
+                - if(Dalpha(t)==0 && alpha(t)<=alpha_max):  return (True, alpha(t)*v)
+                - if(alpha(t)==alpha_max && Dalpha(t)>0):   alpha=alpha(t), Dalpha=Dalpha(t), break
+                - if(alpha(t)<alpha_max && Dalpha>0):       t_lb=t, t=(t_ub+t_lb)/2
+                - else                                      t_ub=t, t=(t_ub+t_lb)/2
+                
+'''
+def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER=1000, DO_PLOTS=False, verb=0):
+    g_vector = np.array([0,0,-9.81]);
+    (H,h) = compute_GIWC(contact_points, contact_normals, mu, 4);
+    
+    ''' If initial com velocity is zero then test static equilibrium '''
+    if(np.linalg.norm(dc0) < EPS):
+        w = np.zeros(6);
+        w[2] = -mass*9.81;
+        w[3:] = mass*np.cross(c0, g_vector);
+        if(np.max(np.dot(H, w) - h) < EPS):
+            return (True, c0, dc0);
+        return (False, c0, dc0);
+
+    ''' Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=DDalpha*v, v=dc0/||dc0||: a*alpha + b*DDalpha <= d '''
+    v = dc0/np.linalg.norm(dc0);
+    K = np.zeros((6,3));
+    K[:3,:] = mass*np.identity(3);
+    K[3:,:] = mass*crossMatrix(c0);
+    d = h - np.dot(H, np.dot(K,g_vector));
+    b = np.dot(np.dot(-H,K),v);             # vector multiplying com acceleration
+    tmp = np.array([[0,0,0,0,1,0],          #temp times the variation dc will result in 
+                    [0,0,0,-1,0,0],         # [ 0 0 0 dc_y -dc_x 0]^T
+                    [0,0,0,0,0,0]]).T;   
+    a = mass*9.81*np.dot(np.dot(H,tmp),v);
+    
+    if(DO_PLOTS):
+        range_plot = 10;
+        ax = plot_inequalities(np.vstack([a,b]).T, d, [-range_plot,range_plot], [-range_plot,range_plot]);
+        plt.axis([0,range_plot,-range_plot,0])
+        plt.title('Feasible com pos-acc');
+        plut.movePlotSpines(ax, [0, 0]);
+        ax.set_xlabel('com pos');
+        ax.set_ylabel('com acc');
+        plt.show();
+        
+    ''' Eliminate redundant inequalities '''
+#    A_red, d = eliminate_redundant_inequalities(np.vstack([a,b]).T, d);
+#    a = A_red[:,0];
+#    b = A_red[:,1];
+	
+    ''' Normalize inequalities to have unitary coefficients for DDalpha: b*DDalpha <= d - a*alpha '''
+    for i in range(a.shape[0]):
+        if(abs(b[i]) > EPS):
+            a[i] /= abs(b[i]);
+            d[i] /= abs(b[i]);
+            b[i] /= abs(b[i]);
+        else:
+            print "ERROR: cannot normalize inequality because coefficient of DDalpha is almost zero", b[i];
+            return (False, c0, dc0);
+    
+    
+    ''' Initialize: alpha=0, Dalpha=||dc0|| '''
+    alpha = 0;
+    Dalpha = np.linalg.norm(dc0);
+    
+    for iiii in range(MAX_ITER):
+        ''' Find current active inequality: b*DDalpha <= d - a*alpha (i.e. DDalpha lower bound for current alpha value) ''' 
+        #sort b indices to only keep negative values
+        negative_ids = np.where(b<0)[0];
+        a_alpha_d = a*alpha-d;
+        a_alpha_d_negative_bs = a_alpha_d[negative_ids];
+        (i_DDalpha_min, DDalpha_min) = [(i,a_min) for (i, a_min) in [(j, a_alpha_d[j]) for j in negative_ids] if (a_min >= a_alpha_d_negative_bs).all()][0]
+        if(verb>0):
+            print "DDalpha_min", DDalpha_min;
+            print "i_DDalpha_min", i_DDalpha_min;
+            
+        '''If DDalpha_lower_bound>0: return False '''
+        if(DDalpha_min >= -EPS):
+            if(verb>0):
+                print "Algorithm converged because DDalpha is positive";
+            return (False, c0+alpha*v, Dalpha*v);
+        
+        ''' Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality) '''
+        den = b*a[i_DDalpha_min] + a;
+        i_pos = np.where(den>0)[0];
+        if(i_pos.shape[0]==0):
+            print "ERROR b*a_i0+a is never positive, that means that alpha_max is unbounded", den;
+            return (False, c0+alpha*v, Dalpha*v);
+        alpha_max = np.min((d[i_pos] + b[i_pos]*d[i_DDalpha_min])/den[i_pos]);
+        if(verb>0):
+            print "alpha_max", alpha_max;
+        if(alpha_max<alpha):
+            print "ERROR: alpha_max<alpha", alpha_max, alpha;
+            return (False, c0+alpha*v, Dalpha*v);
+            
+        ''' If DDalpha is not always negative on the current segment then update alpha_max to the point 
+            where the current segment intersects the x axis '''
+        if( a[i_DDalpha_min]*alpha_max - d[i_DDalpha_min] > 0.0):
+            alpha_max = d[i_DDalpha_min] / a[i_DDalpha_min];
+            if(verb>0):
+                print "Updated alpha_max", alpha_max;
+        
+        ''' Initialize: t=T_0, t_ub=10, t_lb=0 '''
+        t = T_0;
+        t_ub = 10;
+        t_lb = 0;
+        if(abs(a[i_DDalpha_min])>EPS):
+            omega = sqrt(a[i_DDalpha_min]+0j);
+            if(verb>0):
+                print "omega", omega;
+        else:
+            # if the acceleration is constant over time I can compute directly the time needed
+            # to bring the velocity to zero:
+            #     Dalpha(t) = Dalpha(0) + t*DDalpha = 0
+            #     t = -Dalpha(0)/DDalpha
+            t = Dalpha / d[i_DDalpha_min];
+            alpha_t  = alpha + t*Dalpha - 0.5*t*t*d[i_DDalpha_min];
+            if(alpha_t <= alpha_max+EPS):
+                if(verb>0):
+                    print "DDalpha_min is independent from alpha, algorithm converged to Dalpha=0";
+                return (True, c0+alpha_t*v, 0.0*v);
+            # if alpha reaches alpha_max before the velocity is zero, then compute the time needed to reach alpha_max
+            #     alpha(t) = alpha(0) + t*Dalpha(0) + 0.5*t*t*DDalpha = alpha_max
+            #     t = (- Dalpha(0) +/- sqrt(Dalpha(0)^2 - 2*DDalpha(alpha(0)-alpha_max))) / DDalpha;
+            # where DDalpha = -d[i_DDalpha_min]
+            # Having two solutions, we take the smallest one because we want to find the first time
+            # at which alpha reaches alpha_max
+            delta = sqrt(Dalpha**2 + 2*d[i_DDalpha_min]*(alpha-alpha_max))
+            t = (- Dalpha - delta) / d[i_DDalpha_min];
+            if(t<0.0):
+                # If the smallest time at which alpha reaches alpha_max is negative print a WARNING because this should not happen
+                print "WARNING: Time is less than zero:", t, alpha, Dalpha, d[i_DDalpha_min], alpha_max; 
+                t = (- Dalpha + delta) / d[i_DDalpha_min];
+                if(t<0.0):
+                    # If also the largest time is negative print an ERROR and return
+                    print "ERROR: Time is still less than zero:", t, alpha, Dalpha, d[i_DDalpha_min], alpha_max; 
+                    return (False, c0+alpha*v, Dalpha*v);
+            
+            
+        bisection_converged = False;
+        for jjjj in range(MAX_ITER):
+            ''' Integrate LDS until t: DDalpha = a*alpha - d '''
+            if(abs(a[i_DDalpha_min])>EPS):
+                # if a=0 then the acceleration is a linear function of the position and I need to use this formula to integrate
+                sh = np.sinh(omega*t);
+                ch = np.cosh(omega*t);
+                alpha_t  = ch*alpha + sh*Dalpha/omega + (1-ch)*(d[i_DDalpha_min]/a[i_DDalpha_min]);
+                Dalpha_t = omega*sh*alpha + ch*Dalpha - omega*sh*(d[i_DDalpha_min]/a[i_DDalpha_min]);
+            else:
+                # if a=0 then the acceleration is constant and I need to use this formula to integrate
+                alpha_t  = alpha + t*Dalpha - 0.5*t*t*d[i_DDalpha_min];
+                Dalpha_t = Dalpha - t*d[i_DDalpha_min];
+            
+            if(np.imag(alpha_t) != 0.0):
+                print "ERROR alpha is imaginary", alpha_t;
+                return (False, c0+alpha*v, Dalpha*v);
+            if(np.imag(Dalpha_t) != 0.0):
+                print "ERROR Dalpha is imaginary", Dalpha_t
+                return (False, c0+alpha*v, Dalpha*v);
+                
+            alpha_t = np.real(alpha_t);
+            Dalpha_t = np.real(Dalpha_t);
+            if(verb>0):
+                print "Bisection iter",jjjj,"alpha",alpha_t,"Dalpha",Dalpha_t,"t", t
+            
+            if(abs(Dalpha_t)<EPS and alpha_t <= alpha_max+EPS):
+                if(verb>0):
+                    print "Algorithm converged to Dalpha=0";
+                return (True, c0+alpha_t*v, Dalpha_t*v);
+            if(abs(alpha_t-alpha_max)<EPS and Dalpha_t>0):
+                alpha = alpha_max+EPS;
+                Dalpha = Dalpha_t;
+                bisection_converged = True;
+                break;
+            if(alpha_t<alpha_max and Dalpha_t>0):       
+                t_lb=t;
+                t=(t_ub+t_lb)/2;
+            else:                                      
+                t_ub=t; 
+                t=(t_ub+t_lb)/2;
+        
+        if(not bisection_converged):
+            print "ERROR: Bisection search did not converge in %d iterations"%MAX_ITER;
+            return (False, c0+alpha*v, Dalpha*v);
+
+    print "ERROR: Numerical integration did not converge in %d iterations"%MAX_ITER;
+    if(DO_PLOTS):
+        plt.show();
+        
+    return (False, c0+alpha*v, Dalpha*v);
+    
+    
+    
+''' PROBLEM 2: MULTI-CONTACT CAPTURE POINT (what's the max vel in a given direction such that I can stop)
+    Input: initial CoM position c0, initial CoM velocity direction v, contact points CP, friction coefficient mu, T_0=1
+    Output: The (norm of the) max initial CoM velocity such that I can stop without changing contacts is 
+            a piece-wise linear function of the CoM position (on the given line), which is returned as a
+            list P of 2D points in the space where:
+            - x is the CoM offset relatively to c0 along v (i.e. c=c0+x*v)
+            - y is the maximum CoM velocity along v
+    Steps:
+        - Compute GIWC: H*w <= h, where w=(m*(g-ddc), m*cx(g-ddc))
+        - Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=-DDalpha*v: A*(alpha,DDalpha)<=b
+        - Find ordered (right-most first, counter clockwise) vertices of 2d polytope A*(alpha,DDalpha)<=b: V
+        - if(line passing through c0 in direction v does not intersect static-equilibrium polytope): return []
+        - Find extremum of static-equilibrium polytope in direction v: c1
+        - Initialize: alpha=||c1-c0||, Dalpha=0
+        - Initialize: P=[(alpha,0)]
+        - LOOP:
+            - Find current active inequality: a*alpha + b*DDalpha <= d (i.e. DDalpha upper bound for current alpha value)
+            - Find alpha_min (i.e. value of alpha corresponding to left vertex of active inequality)
+            - Initialize: t=-T_0, t_ub=-10, t_lb=0
+            LOOP:
+                - Integrate backward in time LDS until t:   DDalpha = d/b - (a/d)*alpha
+                - if(alpha(t)==alpha_min):                  alpha=alpha(t), Dalpha=Dalpha(t)
+                                                            P = [(alpha_min,Dalpha)]+P                   
+                                                            break
+                - if(alpha(t)<alpha_min):                   t_ub=t, t=(t_ub+t_lb)/2
+                - else:                                     t_lb=t, t=(t_ub+t_lb)/2
+            - if(alpha_min<=0): return P
+            - if(left vertex of active inequality is left-most vertex): return P
+
+
+    
+    PROBLEM 3: VELOCITY PROPAGATION WITH CONTACT TRANSITION
+    Input: initial CoM pos c0, initial CoM vel dc0, final CoM pos c2, initial contacts CP0, final contacts CP2, 
+           friction coefficient mu, min CoM distance d_min to travel in CP1
+    Assumptions: 
+        - CoM path is a straight line from c0 to c2. 
+        - CP0 and CP2 contains the same number of contacts N, out of which N-1 contacts must be exactly the same.
+    Output: Min and max feasible final CoM velocity (in norm) c2_min, c2_max
+    Steps:
+        - Define CP1 as the intersection of CP0 and CP2
+        - Define alpha as: c=c0+alpha*v, ddc=DDalpha*v
+        - Define v=(c2-c0)/||c2-c0||
+        - Compute the GIWCs associated to CP0, CP1, CP2: H^i*w <= h^i, where w=(m*(g-ddc), m*cx(g-ddc)), i=0,1,2
+        - Project GIWCs Ci in (alpha,DDalpha) space: A^i*(alpha,DDalpha)<=b^i
+        - Compute intersection between C0 and C1 (C01), and C1 and C2 (C12)
+        - If C01 contains zero
+'''
+def test():
+    DO_PLOTS = False;
+    PLOT_3D = False;
+    mass = 75;             # mass of the robot
+    mu = 0.5;           # friction coefficient
+    lx = 0.1;           # half foot size in x direction
+    ly = 0.07;          # half foot size in y direction
+    USE_DIAGONAL_GENERATORS = True;
+    GENERATE_QUASI_FLAT_CONTACTS = True;
+    #First, generate a contact configuration
+    CONTACT_POINT_UPPER_BOUNDS = [ 0.5,  0.5,  0.5];
+    CONTACT_POINT_LOWER_BOUNDS = [-0.5, -0.5,  0.0];
+    gamma = atan(mu);   # half friction cone angle
+    RPY_LOWER_BOUNDS = [-2*gamma, -2*gamma, -pi];
+    RPY_UPPER_BOUNDS = [+2*gamma, +2*gamma, +pi];
+    MIN_CONTACT_DISTANCE = 0.3;
+    N_CONTACTS = 2
+    
+    X_MARG = 0.07;
+    Y_MARG = 0.07;
+    
+    succeeded = False;
+    
+    while(succeeded == False):
+        (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS);        
+        X_LB = np.min(p[:,0]-X_MARG);
+        X_UB = np.max(p[:,0]+X_MARG);
+        Y_LB = np.min(p[:,1]-Y_MARG);
+        Y_UB = np.max(p[:,1]+Y_MARG);
+        Z_LB = np.min(p[:,2]-0.05);
+        Z_UB = np.max(p[:,2]+1.5);
+        (H,h) = compute_GIWC(p, N, mu, 4, USE_DIAGONAL_GENERATORS);
+        (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
+        
+    dc0 = np.random.uniform(-1, 1, size=3); 
+    dc0[2] = 0;
+    
+    if(DO_PLOTS):
+        f, ax = plut.create_empty_figure();
+        for j in range(p.shape[0]):
+            ax.scatter(p[j,0], p[j,1], c='k', s=100);
+        ax.scatter(c0[0], c0[1], c='r', s=100);
+        com_x = np.zeros(2);
+        com_y = np.zeros(2);
+        com_x[0] = c0[0]; 
+        com_y[0] = c0[1];
+        com_x[1] = c0[0]+dc0[0]; 
+        com_y[1] = c0[1]+dc0[1];
+        ax.plot(com_x, com_y, color='b');
+        plt.axis([X_LB,X_UB,Y_LB,Y_UB]);           
+        plt.title('Contact Points and CoM position'); 
+        
+    if(PLOT_3D):
+        fig = plt.figure(figsize=plt.figaspect(0.5)*1.5)
+        ax = fig.gca(projection='3d')
+        line_styles =["b", "r", "c", "g"];
+        ss = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3];
+        ax.scatter(c0[0],c0[1],c0[2], c='k', marker='o');
+        for i in range(p.shape[0]):
+            ax.scatter(p[i,0],p[i,1],p[i,2], c=line_styles[i%len(line_styles)], marker='o');
+            for s in ss:
+                ax.scatter(p[i,0]+s*N[i,0],p[i,1]+s*N[i,1],p[i,2]+s*N[i,2], c=line_styles[i%len(line_styles)], marker='x');
+        for s in ss:
+            ax.scatter(c0[0]+s*dc0[0],c0[1]+s*dc0[1],c0[2]+s*dc0[2], c='k', marker='x');
+        ax.set_xlabel('x'); ax.set_ylabel('y'); ax.set_zlabel('z');
+   
+#    cProfile.run("can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);");
+#    return True
+    return can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
+#    (has_stopped, c_final) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
+#    if(DO_PLOTS):
+#        plt.show();
+        
+
+if __name__=="__main__":
+    for i in range(1):
+        try:
+            test();
+#            ret = cProfile.run("test()");
+        except Exception as e:
+            print e;
+            continue;
