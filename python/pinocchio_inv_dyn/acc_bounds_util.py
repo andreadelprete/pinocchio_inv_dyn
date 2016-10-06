@@ -51,6 +51,20 @@ def isStateViable(q, dq, qMin, qMax, dqMax, ddqMax, verbose=False):
     return 0.0;
     
 
+def computeVelLimits(q, qMin, qMax, dqMax, ddqMax, verbose=False):
+    if(q<qMin-EPS):
+        if(verbose):
+            print "State (%f) not viable because q<qMin" % (q);
+        return None;
+    if(q>qMax+EPS):
+        if(verbose):
+            print "State (%f) not viable because q>qMax" % (q);
+        return None;
+    dqMaxViab = min( dqMax,  sqrt(max(0,2*ddqMax*(qMax-q))));
+    dqMinViab = max(-dqMax, -sqrt(max(0,2*ddqMax*(q-qMin))));
+    return (dqMinViab, dqMaxViab);
+    
+
 ''' Compute acceleration limits imposed by position bounds.
 '''
 def computeAccLimitsFromPosLimits(q, dq, qMin, qMax, ddqMax, dt, verbose=True):
