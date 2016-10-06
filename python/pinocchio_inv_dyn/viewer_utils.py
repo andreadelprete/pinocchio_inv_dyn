@@ -6,7 +6,9 @@ Created on Mon Nov 16 16:34:46 2015
 """
 
 import pinocchio as se3
+from pinocchio.utils import zero as mat_zeros
 from pinocchio import RobotWrapper
+
 from time import sleep
 from time import time
 import os
@@ -18,7 +20,7 @@ ENABLE_VIEWER = True;
     
 def xyzRpyToViewerConfig(xyz, rpy):
     R = se3.utils.rpyToMatrix(rpy);
-    H = se3.SE3(R, xyz.reshape(3,1));
+    H = se3.SE3(R, xyz);
     pinocchioConf = se3.utils.se3ToXYZQUAT(H);
     return se3.utils.XYZQUATToViewerConfiguration(pinocchioConf);
     
@@ -44,7 +46,7 @@ class Viewer(object):
 
     def __init__(self, name, robotWrapper, robotName='robot1'):
         self.name = name;
-        self.filter = FirstOrderLowPassFilter(0.002, self.CAMERA_LOW_PASS_FILTER_CUT_FREQUENCY, np.zeros(2));
+        self.filter = FirstOrderLowPassFilter(0.002, self.CAMERA_LOW_PASS_FILTER_CUT_FREQUENCY, mat_zeros(2));
         if(ENABLE_VIEWER):
             self.robot = robotWrapper;
             self.robot.initDisplay("world/"+robotName, loadModel=False);
@@ -90,7 +92,7 @@ class Viewer(object):
         self.addSphere('com', self.COM_SPHERE_RADIUS, zeros((3,1)), zeros((3,1)), self.COM_SPHERE_COLOR, 'OFF');
         if(ENABLE_VIEWER):
             trajRate = 1.0/dt
-            rate = int(slow_down_factor*trajRate/self.PLAYER_FRAME_RATE);
+            rate = max(1, int(slow_down_factor*trajRate/self.PLAYER_FRAME_RATE));
             lastRefreshTime = time();
             timePeriod = 1.0/self.PLAYER_FRAME_RATE;
             for t in range(0,q.shape[1],rate):                
@@ -165,7 +167,7 @@ class Viewer(object):
             self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
             self.robot.viewer.gui.refresh();
         
-    def addMesh(self, name, filename, xyz=np.zeros(3), rpy=np.zeros(3)):
+    def addMesh(self, name, filename, xyz=mat_zeros(3), rpy=mat_zeros(3)):
         if(ENABLE_VIEWER):
             position = xyzRpyToViewerConfig(xyz, rpy);
             self.robot.viewer.gui.addMesh("world/"+name, filename);
@@ -178,7 +180,9 @@ class Viewer(object):
             if(refresh):
                 self.robot.viewer.gui.refresh();
         
-    def updateObjectConfigRpy(self, name, xyz=np.zeros(3), rpy=np.zeros(3)):
+    def updateObjectConfigRpy(self, name, xyz=mat_zeros(3), rpy=mat_zeros(3)):
+        assert xyz.dtype==float
+        assert rpy.dtype==float
         if(ENABLE_VIEWER):
             config = xyzRpyToViewerConfig(xyz, rpy);
             self.updateObjectConfig(name, config);
