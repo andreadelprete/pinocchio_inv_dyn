@@ -12,11 +12,16 @@ import matplotlib.pyplot as plt
 
 NUMBER_TYPE = 'float'  # 'float' or 'fraction'
 
+''' Compute the convex hull of the given points.
+    @param S An NxM numpy array (or matrix), where N is the size of the points and M is the number of points.
+    @return (A,b) where A*x+b >=0 is the set of inequalities defining the convex hull.
+'''
 def compute_convex_hull(S):
     """
     Returns the matrix A and the vector b such that:
         {x = S z, sum z = 1, z>=0} if and only if {A x + b >= 0}.
     """
+    S = np.asarray(S);
     V = np.hstack([np.ones((S.shape[1], 1)), S.T])
     # V-representation: first column is 0 for rays, 1 for vertices
     V_cdd = cdd.Matrix(V, number_type=NUMBER_TYPE)
@@ -25,6 +30,7 @@ def compute_convex_hull(S):
     H = np.array(P.get_inequalities())
     b, A = H[:, 0], H[:, 1:]
     return (A,b)
+    
     
 def plot_convex_hull(A, b, points=None):
     X_MIN = np.min(points[:,0]);
@@ -79,6 +85,10 @@ def plot_convex_hull(A, b, points=None):
 if __name__ == "__main__":
     points = np.random.rand(30, 2)   # 30 random points in 2-D
     (A,b) = compute_convex_hull(points.T);
+    plot_convex_hull(A,b,points);
+    
+    points_M = np.matrix(points);
+    (A,b) = compute_convex_hull(points_M.T);
     plot_convex_hull(A,b,points);
     
 
