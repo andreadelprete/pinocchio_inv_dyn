@@ -106,6 +106,9 @@ def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTAC
 def compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=False, USE_DIAGONAL_GENERATORS=True):
     assert contact_points.shape[1]==3
     assert contact_normals.shape[1]==3
+    contact_points = np.asarray(contact_points);
+    contact_normals = np.asarray(contact_normals);
+    
     ''' compute generators '''
     nContacts = contact_points.shape[0];
     #gamma = atan(mu);   # half friction cone angle
