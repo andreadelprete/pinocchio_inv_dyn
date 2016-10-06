@@ -25,7 +25,7 @@ class Task:
   def setCoeff(self, value):
     self._coeff = value
 
-  def dyn_value(self, t, q, qdot, update_geometry = False):
+  def dyn_value(self, t, q, v, update_geometry = False):
     a_des = np.matrix ([]).reshape (0, 0)
     J = np.matrix ([]).reshape (0, 0)
     drift = np.matrix ([]).reshape (0, 0)
@@ -69,6 +69,9 @@ class SE3Task(Task):
   def refConfiguration (self, M_ref):
     assert isinstance(M_ref, SE3), "M_ref is not an element of class SE3"
     self._M_ref = M_ref
+    
+  def framePosition(self):
+    return self.robot.framePosition(self._frame_id);
 
   def dyn_value(self, t, q, v, local_frame = True):
     # Get the current configuration of the link
