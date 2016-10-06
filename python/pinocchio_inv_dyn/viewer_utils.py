@@ -19,6 +19,8 @@ from first_order_low_pass_filter import FirstOrderLowPassFilter
 ENABLE_VIEWER = True;
     
 def xyzRpyToViewerConfig(xyz, rpy):
+    xyz = np.asmatrix(xyz).reshape((3,1));
+    rpy = np.asmatrix(rpy).reshape((3,1));
     R = se3.utils.rpyToMatrix(rpy);
     H = se3.SE3(R, xyz);
     pinocchioConf = se3.utils.se3ToXYZQUAT(H);
