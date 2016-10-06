@@ -741,5 +741,6 @@ class Simulator (object):
         return res;
         
     def updateComPositionInViewer(self, com):
+        assert com.shape[0]==3, "com should be a 3x1 matrix"
         if(self.DISPLAY_COM):
-            self.viewer.updateObjectConfig('com', (com[0,0], com[1,0], 0, 0,0,0,1));
+            self.viewer.updateObjectConfig('com', (com[0,0], com[1,0], com[2,0], 0,0,0,1));
