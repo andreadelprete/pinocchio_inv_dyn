@@ -103,10 +103,13 @@ def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTAC
     @param USE_DIAGONAL_GENERATORS If True generate the generators turned of 45 degrees
     @return (H,h) Matrix and vector defining the GIWC as H*w <= h
 '''
-def compute_GIWC(contact_points, contact_normals, mu, cg=4, eliminate_redundancies=False, USE_DIAGONAL_GENERATORS=True):
+def compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=False, USE_DIAGONAL_GENERATORS=True):
+    assert contact_points.shape[1]==3
+    assert contact_normals.shape[1]==3
     ''' compute generators '''
     nContacts = contact_points.shape[0];
     #gamma = atan(mu);   # half friction cone angle
+    cg = 4;
     nGen = nContacts*cg;           # number of generators
     S = np.zeros((3,nGen));
     T1 = np.zeros((nContacts,3));
@@ -163,7 +166,7 @@ def compute_GIWC(contact_points, contact_normals, mu, cg=4, eliminate_redundanci
     @param g_vector Gravity vector
     @return (A,b)
 '''
-def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_redundant_ineq=True):
+def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_redundant_ineq=False):
     K = np.zeros((6,3));
     K[:3,:] = mass*np.identity(3);
     K[3:,:] = mass*crossMatrix(com_pos);
@@ -195,9 +198,14 @@ def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_r
                 - else                                      t_ub=t, t=(t_ub+t_lb)/2
                 
 '''
-def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER=1000, DO_PLOTS=False, verb=0):
+def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER=1000, DO_PLOTS=False, verb=0, eliminate_redundancies=False):
+    c0 = np.asarray(c0).squeeze();
+    dc0 = np.asarray(dc0).squeeze();
+    contact_points = np.asarray(contact_points);
+    contact_normals = np.asarray(contact_normals);
+    
     g_vector = np.array([0,0,-9.81]);
-    (H,h) = compute_GIWC(contact_points, contact_normals, mu, 4);
+    (H,h) = compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=eliminate_redundancies);
     
     ''' If initial com velocity is zero then test static equilibrium '''
     if(np.linalg.norm(dc0) < EPS):
@@ -231,9 +239,10 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         plt.show();
         
     ''' Eliminate redundant inequalities '''
-#    A_red, d = eliminate_redundant_inequalities(np.vstack([a,b]).T, d);
-#    a = A_red[:,0];
-#    b = A_red[:,1];
+    if(eliminate_redundancies):
+        A_red, d = eliminate_redundant_inequalities(np.vstack([a,b]).T, d);
+        a = A_red[:,0];
+        b = A_red[:,1];
 	
     ''' Normalize inequalities to have unitary coefficients for DDalpha: b*DDalpha <= d - a*alpha '''
     for i in range(a.shape[0]):
@@ -313,11 +322,11 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
             # Having two solutions, we take the smallest one because we want to find the first time
             # at which alpha reaches alpha_max
             delta = sqrt(Dalpha**2 + 2*d[i_DDalpha_min]*(alpha-alpha_max))
-            t = (- Dalpha - delta) / d[i_DDalpha_min];
+            t = ( Dalpha - delta) / d[i_DDalpha_min];
             if(t<0.0):
                 # If the smallest time at which alpha reaches alpha_max is negative print a WARNING because this should not happen
                 print "WARNING: Time is less than zero:", t, alpha, Dalpha, d[i_DDalpha_min], alpha_max; 
-                t = (- Dalpha + delta) / d[i_DDalpha_min];
+                t = (Dalpha + delta) / d[i_DDalpha_min];
                 if(t<0.0):
                     # If also the largest time is negative print an ERROR and return
                     print "ERROR: Time is still less than zero:", t, alpha, Dalpha, d[i_DDalpha_min], alpha_max; 
