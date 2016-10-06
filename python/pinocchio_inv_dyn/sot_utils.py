@@ -155,7 +155,7 @@ def crossMatrix( v ):
     an arbitrary set of contact points with a friction coefficient of mu.
         H w <= 0 
 '''
-def computeContactInequalities(contact_points, contact_normals, mu):
+def compute6dContactInequalities(contact_points, contact_normals, mu):
     c = contact_points.shape[0];    # number of contact points
     cg = 4;                         # number of generators per contact point    
     G4 = np.zeros((c,3,cg));        # contact generators
@@ -291,20 +291,33 @@ def qpOasesSolverMsg(imode):
     minimize    || A*x-b ||^2
     subject to  lb_in <= A_in*x <= ub_in
                    lb <= x <= ub
+    All input data can be either numpy arrays or numpy matrices.
+    @return (imode, x) where imode is a flag representing the output status of the solver
+                        and x is a numpy nx1 matrix containing the solution.
 '''
 def solveLeastSquare(A, b, lb=None, ub=None, A_in=None, lb_in=None, ub_in=None, maxIterations=None, maxComputationTime=60.0, regularization=1e-8):
     n = A.shape[1];
     m_in = 0;
+    A = np.asarray(A);
+    b = np.asarray(b).squeeze();
     if(A_in!=None):
         m_in = A_in.shape[0];
         if(lb_in==None):
             lb_in = np.array(m_in*[-1e99]);
+        else:
+            lb_in = np.asarray(lb_in).squeeze();
         if(ub_in==None):
             ub_in = np.array(m_in*[1e99]);
+        else:
+            ub_in = np.asarray(ub_in).squeeze();
     if(lb==None):
         lb = np.array(n*[-1e99]);
+    else:
+        lb = np.asarray(lb).squeeze();
     if(ub==None):
         ub = np.array(n*[1e99]);
+    else:
+        ub = np.asarray(ub).squeeze();
 
     # 0.5||Ax-b||^2 = 0.5(x'A'Ax - 2b'Ax + b'b) = 0.5x'A'Ax - b'Ax +0.5b'b
     Hess = np.dot(A.T,A) + regularization*np.identity(n);
@@ -329,7 +342,7 @@ def solveLeastSquare(A, b, lb=None, ub=None, A_in=None, lb_in=None, ub_in=None, 
     x = np.empty(n);
     qpOasesSolver.getPrimalSolution(x);
     #print "QP cost:", 0.5*(np.linalg.norm(np.dot(A, x)-b)**2);
-    return (imode,x);
+    return (imode, np.asmatrix(x).T);
     
     
 def setDynamicProperties(model, dt):

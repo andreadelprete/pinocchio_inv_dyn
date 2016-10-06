@@ -4,9 +4,8 @@ from numpy.random import random
 from polytope_conversion_utils import cone_span_to_face
 from pinocchio_inv_dyn.robot_wrapper import RobotWrapper
 import pinocchio as se3
-from min_jerk_traj_gen import MinimumJerkTrajectoryGenerator
 from acc_bounds_util_multi_dof import computeAccLimits
-from sot_utils import computeContactInequalities, crossMatrix
+from sot_utils import compute6dContactInequalities, crossMatrix
 from first_order_low_pass_filter import FirstOrderLowPassFilter
 from convex_hull_util import compute_convex_hull, plot_convex_hull
 
@@ -28,7 +27,6 @@ class InvDynFormulation (object):
     ENABLE_TORQUE_LIMITS        = True;
     ENABLE_FORCE_LIMITS         = True;
     
-    USE_COM_TRAJECTORY_GENERATOR = False;
     USE_JOINT_VELOCITY_ESTIMATOR = False;
     BASE_VEL_FILTER_CUT_FREQ = 5;
     JOINT_VEL_ESTIMATOR_DELAY = 0.02;
@@ -49,7 +47,6 @@ class InvDynFormulation (object):
     
     ind_force_in = [];  # indeces of force inequalities
     ind_acc_in = [];    # indeces of acceleration inequalities
-#    ind_torque_in = []; # indeces of torque inequalities
     ind_cp_in = [];     # indeces of capture point inequalities
     
     tauMax=[];  # torque limits
@@ -96,7 +93,7 @@ class InvDynFormulation (object):
     x_com = [];     # com 3d position
     dx_com = [];    # com 3d velocity
     ddx_com = [];   # com 3d acceleration
-    cp = None;      # capture point
+    cp = [];        # capture point
 
     mass = 0;
     J_com = [];     # com Jacobian
@@ -113,8 +110,8 @@ class InvDynFormulation (object):
     dJc_v = [];     # product of contact Jacobian time derivative and velocity vector: dJc*v
     
     rigidContactConstraints = [];   # tasks associated to the contact constraints
-    rigidContactConstraints_p = []; # contact points
-    rigidContactConstraints_N = []; # contact normals
+    rigidContactConstraints_p = []; # contact points in local frame
+    rigidContactConstraints_N = []; # contact normals in local frame
     rigidContactConstraints_fMin = [];  # minimum normal forces
     rigidContactConstraints_mu = [];    # friction coefficients
     rigidContactConstraints_m_in = [];  # number of inequalities
@@ -127,7 +124,9 @@ class InvDynFormulation (object):
     b_conv_hull = None;
 
     
-    def updateInequalityData(self):
+    def updateInequalityData(self, updateConstrainedDynamics=True):
+        self.updateConvexHull();
+        
         self.m_in = 0;                              # number of inequalities
         c = len(self.rigidContactConstraints);      # number of unilateral contacts
         self.k = int(np.sum([con.dim for con in self.rigidContactConstraints]));
@@ -139,7 +138,8 @@ class InvDynFormulation (object):
             ii = 0;
             for i in range(c):
                 (Bfi, bfi) = self.createContactForceInequalities(self.rigidContactConstraints_fMin[i], self.rigidContactConstraints_mu[i], \
-                                                               self.rigidContactConstraints_p[i], self.rigidContactConstraints_N[i]);
+                                                                 self.rigidContactConstraints_p[i], self.rigidContactConstraints_N[i], \
+                                                                 self.rigidContactConstraints[i].framePosition().rotation);
                 self.rigidContactConstraints_m_in[i] = Bfi.shape[0];
                 tmp = zeros((Bfi.shape[0], self.k));
                 dim = self.rigidContactConstraints[i].dim;
@@ -172,6 +172,7 @@ class InvDynFormulation (object):
         else:
             self.ind_cp_in = [];
             
+        # resize all data that depends on k
         self.B          = zeros((self.m_in, self.nv+self.k+self.na));
         self.b          = zeros(self.m_in);
         self.Jc         = zeros((self.k,self.nv));
@@ -181,27 +182,30 @@ class InvDynFormulation (object):
         self.Jc_Minv    = zeros((self.k,self.nv));
         self.Lambda_c   = zeros((self.k,self.k));
         self.Jc_T_pinv  = zeros((self.k,self.nv));
-        self.Nc_T       = np.matlib.eye(self.nv);
         self.C           = zeros((self.nv+self.k+self.na, self.na));
         self.c           = zeros(self.nv+self.k+self.na);
         
         if(self.ENABLE_FORCE_LIMITS and self.k>0):
             self.B[self.ind_force_in, self.nv:self.nv+self.k] = Bf;
             self.b[self.ind_force_in] = bf;
-#            print "Contact inequality constraints:\n", self.B[self.ind_force_in, self.nv:self.nv+self.k], "\n", bf.T;
+            #print "Contact inequality constraints:\n", self.B[self.ind_force_in, self.nv:self.nv+self.k], "\n", bf.T;
+        
+        if(updateConstrainedDynamics):
+            self.updateConstrainedDynamics();
         
     
     def __init__(self, name, q, v, dt, mesh_dir, urdfFileName, freeFlyer=True):
         if(freeFlyer):
             self.r = RobotWrapper(urdfFileName, mesh_dir, root_joint=se3.JointModelFreeFlyer());
         else:
-            self.r = RobotWrapper(urdfFileName, mesh_dir, None);        
+            self.r = RobotWrapper(urdfFileName, mesh_dir, None);
         self.freeFlyer = freeFlyer;
         self.nq = self.r.nq;
         self.nv = self.r.nv;
         self.na = self.nv-6 if self.freeFlyer else self.nv;
         self.k = 0;        # number of constraints
         self.dt = dt;
+        self.t = 0.0;
         self.name = name;
         self.Md = zeros((self.na,self.na)); #np.diag([ g*g*i for (i,g) in zip(INERTIA_ROTOR,GEAR_RATIO) ]); # rotor inertia
         
@@ -212,6 +216,7 @@ class InvDynFormulation (object):
             self.S_T[6:, :]  = np.matlib.eye(self.na);
         else:
             self.S_T    = np.matlib.eye(self.na);
+        self.Nc_T       = np.matlib.eye(self.nv);
     
         self.qMin       = self.r.model.lowerPositionLimit;
         self.qMax       = self.r.model.upperPositionLimit;
@@ -226,11 +231,10 @@ class InvDynFormulation (object):
             self.tauMax     = self.r.model.effortLimit;
                         
         self.contact_points = zeros((0,3));
-        self.updateConvexHull();
-        self.updateInequalityData();
-        self.setNewSensorData(0, q, v)
+        self.updateInequalityData(updateConstrainedDynamics=False);
+        self.setNewSensorData(0, q, v);        
         
-        self.com_traj_gen = MinimumJerkTrajectoryGenerator(self.dt, 1);
+        
         
     def getFrameId(self, frameName):
         if(self.r.model.existFrame(frameName)==False):
@@ -287,36 +291,36 @@ class InvDynFormulation (object):
         
         
     def updateConvexHull(self):
-        pass;
-#        ''' x_*foot is used for computing the capture-point constraints '''
-#        self.x_lfoot = np.array(self.constr_lfoot.opPointModif.position.value)[0:3,3];
-#        self.x_rfoot = np.array(self.constr_rfoot.opPointModif.position.value)[0:3,3];
-#        
-#        ''' Compute positions of foot corners in world frame '''
-#        self.x_rf = np.array(self.constr_rfoot.opPointModif.position.value)[0:3,3];  # position right foot
-#        self.x_lf = np.array(self.constr_lfoot.opPointModif.position.value)[0:3,3];  # position left foot
-#        self.R_rf = np.array(self.constr_rfoot.opPointModif.position.value)[0:3,0:3];  # rotation matrix right foot
-#        self.R_lf = np.array(self.constr_lfoot.opPointModif.position.value)[0:3,0:3];  # rotation matrix left foot
-#        
-#        self.contact_points[0,:] = np.dot(self.R_rf, np.array([ RIGHT_FOOT_SIZES[0],  RIGHT_FOOT_SIZES[2], 0])) + self.x_rf;
-#        self.contact_points[1,:] = np.dot(self.R_rf, np.array([ RIGHT_FOOT_SIZES[0], -RIGHT_FOOT_SIZES[3], 0])) + self.x_rf;
-#        self.contact_points[2,:] = np.dot(self.R_rf, np.array([-RIGHT_FOOT_SIZES[1],  RIGHT_FOOT_SIZES[2], 0])) + self.x_rf;
-#        self.contact_points[3,:] = np.dot(self.R_rf, np.array([-RIGHT_FOOT_SIZES[1], -RIGHT_FOOT_SIZES[3], 0])) + self.x_rf;
-#        
-#        self.contact_points[4,:] = np.dot(self.R_lf, np.array([ LEFT_FOOT_SIZES[0],  LEFT_FOOT_SIZES[2], 0])) + self.x_lf;
-#        self.contact_points[5,:] = np.dot(self.R_lf, np.array([ LEFT_FOOT_SIZES[0], -LEFT_FOOT_SIZES[3], 0])) + self.x_lf;
-#        self.contact_points[6,:] = np.dot(self.R_lf, np.array([-LEFT_FOOT_SIZES[1],  LEFT_FOOT_SIZES[2], 0])) + self.x_lf;
-#        self.contact_points[7,:] = np.dot(self.R_lf, np.array([-LEFT_FOOT_SIZES[1], -LEFT_FOOT_SIZES[3], 0])) + self.x_lf;
-#
-#        ''' compute convex hull of foot corners '''
-#        (self.B_conv_hull, self.b_conv_hull) = compute_convex_hull(self.contact_points[:,0:2].T);
-#        # normalize inequalities
-#        for i in range(self.B_conv_hull.shape[0]):
-#            tmp = np.linalg.norm(self.B_conv_hull[i,:]);
-#            if(tmp>1e-6):
-#                self.B_conv_hull[i,:] /= tmp;
-#                self.b_conv_hull[i]   /= tmp;
-#plot_convex_hull(self.B_conv_hull, self.b_conv_hull, self.contact_points[:,0:2]);
+        ''' Compute contact points in world frame '''
+        ncp = np.sum([p.shape[1] for p in self.rigidContactConstraints_p]);
+        self.contact_points = zeros((3,ncp));
+        
+        if(ncp==0):
+            self.B_conv_hull = zeros((0,2));
+            self.b_conv_hull = zeros(0);
+        else:
+            ii = 0;
+            for (i,constr) in enumerate(self.rigidContactConstraints):
+                oMi = self.r.framePosition(constr._frame_id);
+                P = self.rigidContactConstraints_p[i];
+                for j in range(P.shape[1]):
+                    self.contact_points[:,ii] = oMi.act(P[:,j]);
+                    ii += 1;
+            
+            ''' compute convex hull of vertical projection of contact points'''
+            (self.B_conv_hull, self.b_conv_hull) = compute_convex_hull(self.contact_points[:2,:].A);
+            
+            # normalize inequalities
+            for i in range(self.B_conv_hull.shape[0]):
+                tmp = np.linalg.norm(self.B_conv_hull[i,:]);
+                if(tmp>1e-6):
+                    self.B_conv_hull[i,:] /= tmp;
+                    self.b_conv_hull[i]   /= tmp;
+
+#            plot_convex_hull(self.B_conv_hull, self.b_conv_hull, self.contact_points[:2,:].A.T);
+            self.B_conv_hull = np.matrix(self.B_conv_hull);
+            self.b_conv_hull = np.matrix(self.b_conv_hull).T;
+            
         
         
     ''' ********** ENABLE OR DISABLE INEQUALITY CONSTRAINTS ********** '''
@@ -347,6 +351,7 @@ class InvDynFormulation (object):
         
         if(updateConstraintReference):
             if(self.USE_JOINT_VELOCITY_ESTIMATOR):
+                raise Exception("Joint velocity estimator not implemented yet");
                 self.estimator.init(self.dt,self.JOINT_VEL_ESTIMATOR_DELAY,self.JOINT_VEL_ESTIMATOR_DELAY,self.JOINT_VEL_ESTIMATOR_DELAY,self.JOINT_VEL_ESTIMATOR_DELAY,True);
                 self.baseVelocityFilter = FirstOrderLowPassFilter(self.dt, self.BASE_VEL_FILTER_CUT_FREQ , np.zeros(6));
             self.r.forwardKinematics(q);
@@ -371,9 +376,7 @@ class InvDynFormulation (object):
         return self.v;
         
     def setNewSensorData(self, t, q, v):
-        k = self.k;
-        nv = self.nv;
-        
+        self.t = t;
         self.setPositions(q, updateConstraintReference=False);
         self.setVelocities(v);
         
@@ -392,7 +395,15 @@ class InvDynFormulation (object):
         self.dx_com     = np.dot(self.J_com, self.v);
         com_z           = self.x_com[2]; #-np.mean(self.contact_points[:,2]);
         self.cp         = self.x_com[:2] + self.dx_com[:2]/np.sqrt(9.81/com_z);
+        self.updateConstrainedDynamics();
+        
 
+    def updateConstrainedDynamics(self):
+        t = self.t;
+        q = self.q;
+        v = self.v;
+        k = self.k;
+        nv = self.nv;
         i = 0;
         for constr in self.rigidContactConstraints:
             dim = constr.dim
@@ -489,17 +500,6 @@ class InvDynFormulation (object):
         b    = self.b_conv_hull + np.dot(self.B_conv_hull, x_com + (dt+1/omega)*dx_com);
         return (B,b);
         
-    def createTorqueInequalities(self, tauMax=None):
-        if(tauMax==None):
-            tauMax = self.tauMax;
-        n = self.na;
-        B = zeros((2*n,n));
-        b = zeros(2*n);
-        B[0:n,:]    =  np.matlib.identity(n);
-        B[n:2*n,:]  = -np.matlib.identity(n);
-        b[0:n]      = self.tauMax;
-        b[n:2*n]    = self.tauMax;
-        return (B,b);
 
     def createJointAccInequalitiesViability(self):
         n  = self.na;
@@ -528,9 +528,19 @@ class InvDynFormulation (object):
         return (B,b);
     
     
-    def createContactForceInequalities(self, fMin, mu, contact_points, contact_normals):
+    ''' Compute the inequality constraints that ensure the contact forces (expressed in world frame)
+        are inside the (linearized) friction cones.
+        @param fMin Minimum normal force
+        @param mu Friction coefficient
+        @param contact_points A 3xN matrix containing the contact points expressed in local frame
+        @param contact_normals A 3xN matrix containing the contact normals expressed in local frame
+        @param oRi Rotation matrix from local to world frame
+    '''
+    def createContactForceInequalities(self, fMin, mu, contact_points, contact_normals, oRi):
         if(contact_points.shape[1]>1):
-            B = -1*computeContactInequalities(contact_points.T, contact_normals.T, mu[0]);
+            B = -1*compute6dContactInequalities(contact_points.T, contact_normals.T, mu[0]);
+            B[:,:3] = np.dot(B[:,:3], oRi.T);
+            B[:,3:] = np.dot(B[:,3:], oRi.T);
             b = zeros(B.shape[0]);
         elif(norm(contact_points)<EPS):
             B = zeros((5,6));
@@ -547,6 +557,7 @@ class InvDynFormulation (object):
             raise ValueError("Contact with only one point that is not at the origin of the frame: NOT SUPPORTED");
 
         return (B,b);
+        
         
     ''' Compute the matrix A and the vectors lbA, ubA such that:
             lbA <= A*tau <= ubA
