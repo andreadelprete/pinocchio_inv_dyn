@@ -72,6 +72,12 @@ class SE3Task(Task):
     
   def framePosition(self):
     return self.robot.framePosition(self._frame_id);
+    
+  def positionError(self, t):
+    oMi = self.robot.framePosition(self._frame_id);
+    M_ref, v_ref, a_ref  = self._ref_trajectory(t);
+    p_error = errorInSE3(oMi, M_ref);
+    return p_error.vector[self._mask];
 
   def dyn_value(self, t, q, v, local_frame = True):
     # Get the current configuration of the link
