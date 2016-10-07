@@ -7,6 +7,8 @@ Created on Mon Nov 16 16:34:46 2015
 
 import pinocchio as se3
 from pinocchio.utils import zero as mat_zeros
+from pinocchio.utils import cross
+from pinocchio.rpy import matrixToRpy
 from pinocchio import RobotWrapper
 
 from time import sleep
@@ -14,6 +16,8 @@ from time import time
 import os
 import numpy as np
 from numpy.matlib import zeros
+from numpy.linalg import norm
+
 from first_order_low_pass_filter import FirstOrderLowPassFilter
 
 ENABLE_VIEWER = True;
@@ -49,6 +53,7 @@ class Viewer(object):
     def __init__(self, name, robotWrapper, robotName='robot1'):
         self.name = name;
         self.filter = FirstOrderLowPassFilter(0.002, self.CAMERA_LOW_PASS_FILTER_CUT_FREQUENCY, mat_zeros(2));
+        self.arrow_radius = {};
         if(ENABLE_VIEWER):
             self.robot = robotWrapper;
             self.robot.initDisplay("world/"+robotName, loadModel=False);
@@ -132,6 +137,10 @@ class Viewer(object):
     def activateMouseCamera(self):
         if(ENABLE_VIEWER):
             self.robot.viewer.gui.activateMouseCamera(self.robot.windowID);       
+    
+    def setVisibility(self, name, mode='OFF'):
+        if(ENABLE_VIEWER):
+            self.robot.viewer.gui.setVisibility('world/'+name, mode);
             
     def setLightingMode(self, name, mode='OFF'):
         if(ENABLE_VIEWER):
@@ -168,7 +177,48 @@ class Viewer(object):
             self.robot.viewer.gui.applyConfiguration('world/'+name, position)
             self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
             self.robot.viewer.gui.refresh();
+            
+    def addArrow(self,name, radius, pos1, pos2, color=(0,0,0,1.0), lightingMode='ON'):
+        if(ENABLE_VIEWER):
+            length = norm(pos1-pos2);
+            self.arrow_radius[name] = radius;
+            self.robot.viewer.gui.addArrow('world/'+name, radius, length, color);
+            self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
+            self.updateObjectConfigRpy(name, pos1);
         
+    def resizeArrow(self, name, radius, length, refresh=True):
+        if(ENABLE_VIEWER):
+            self.robot.viewer.gui.resizeArrow('world/'+name, radius, length);
+            if(refresh):
+                self.robot.viewer.gui.refresh();
+                
+    def moveArrow(self, name, pos1, pos2):
+        if(ENABLE_VIEWER):
+            length = norm(pos1-pos2);
+            self.robot.viewer.gui.resizeArrow('world/'+name, self.arrow_radius[name], length);
+            # compute rotation matrix
+            R = np.matlib.identity(3);
+            a = pos2 - pos1;
+            if(norm(a)!=0.0):
+                a /= norm(a);
+                R[:,0] = a;
+                R[:,1] = cross(a, np.matrix([1.,0.,0.]).T);
+                if(norm(R[:,1])==0.0):
+                    R[:,1] = cross(a, np.matrix([0.,1.,0.]).T);
+                R[:,1] /= norm(R[:,1]);
+                R[:,2] = cross(a, R[:,1]);
+                R[:,2] /= norm(R[:,2]);
+            rpy = matrixToRpy(R);
+            self.updateObjectConfigRpy(name, pos1, rpy);
+        
+    def addLine(self,name, pos1, pos2, color=(0,0,0,1.0), lightingMode='ON'):
+        if(ENABLE_VIEWER):
+            if(len(pos1.shape)==1):
+                self.robot.viewer.gui.addLine('world/'+name, (pos1[0], pos1[1], pos1[2]), (pos2[0], pos2[1], pos2[2]), color);
+            else:
+                self.robot.viewer.gui.addLine('world/'+name, (pos1[0,0], pos1[1,0], pos1[2,0]), (pos2[0,0], pos2[1,0], pos2[2,0]), color);
+            self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
+            
     def addMesh(self, name, filename, xyz=mat_zeros(3), rpy=mat_zeros(3)):
         if(ENABLE_VIEWER):
             position = xyzRpyToViewerConfig(xyz, rpy);
@@ -183,8 +233,8 @@ class Viewer(object):
                 self.robot.viewer.gui.refresh();
         
     def updateObjectConfigRpy(self, name, xyz=mat_zeros(3), rpy=mat_zeros(3)):
-        assert xyz.dtype==float
-        assert rpy.dtype==float
+        assert np.asmatrix(xyz).dtype==float
+        assert np.asmatrix(rpy).dtype==float
         if(ENABLE_VIEWER):
             config = xyzRpyToViewerConfig(xyz, rpy);
             self.updateObjectConfig(name, config);
@@ -200,6 +250,11 @@ class Viewer(object):
     #        pinocchioConf = se3.utils.se3ToXYZQUAT(self.robot.data.oMi[self.robot.index(jointName)]);
     #        viewerConf = se3.utils.XYZQUATToViewerConfiguration(pinocchioConf);
             self.updateObjectConfigRpy(objectName, xyz, rpy);
+        
+    
+    def deleteObject(self, name):
+        if(ENABLE_VIEWER):
+            self.robot.viewer.gui.deleteNode(name, True);
         
     def startCapture(self, filename, extension='jpeg', path='/home/adelpret/capture/'):
         if(ENABLE_VIEWER):
