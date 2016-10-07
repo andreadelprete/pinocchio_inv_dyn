@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg import norm
 from numpy.random import random
 from pinocchio_inv_dyn.robot_wrapper import RobotWrapper
 import pinocchio as se3
@@ -41,10 +42,14 @@ class Simulator (object):
     VIEWER_DT = 0.05;
     DISPLAY_COM = True;
     DISPLAY_CAPTURE_POINT = True;
-    COM_SPHERE_RADIUS = 0.005;
+    COM_SPHERE_RADIUS           = 0.005;
     CAPTURE_POINT_SPHERE_RADIUS = 0.005;
-    COM_SPHERE_COLOR = (1, 0, 0, 1);
-    CAPTURE_POINT_SPHERE_COLOR = (0, 1, 0, 1);
+    CONTACT_FORCE_ARROW_RADIUS  = 0.01;
+    COM_SPHERE_COLOR            = (1, 0, 0, 1); # red, green, blue, alpha
+    CAPTURE_POINT_SPHERE_COLOR  = (0, 1, 0, 1);    
+    CONTACT_FORCE_ARROW_COLOR   = (1, 0, 0, 1);
+    CONTACT_FORCE_ARROW_SCALE   = 1e-3;
+    contact_force_arrow_names = [];  # list of names of contact force arrows
     
     SLIP_VEL_THR = 0.1;
     SLIP_ANGVEL_THR = 0.2;
@@ -742,5 +747,30 @@ class Simulator (object):
         
     def updateComPositionInViewer(self, com):
         assert com.shape[0]==3, "com should be a 3x1 matrix"
-        if(self.DISPLAY_COM):
-            self.viewer.updateObjectConfig('com', (com[0,0], com[1,0], com[2,0], 0,0,0,1));
+        if(self.time_step%int(self.VIEWER_DT/self.dt)==0):
+            if(self.DISPLAY_COM):
+                self.viewer.updateObjectConfig('com', (com[0,0], com[1,0], com[2,0], 0,0,0,1));
+
+    ''' Update the arrows representing the specified contact forces in the viewer.
+        If the arrows have not been created yet, it creates them.
+        If a force arrow that is currently displayed does not appear in the specified
+        list, the arrow visibility is set to OFF.
+        @param contact_names A list of contact names
+        @param contact_points A list of contact points (i.e. 3x1 numpy matrices)
+        @param contact_forces A list of contact forces (i.e. 3x1 numpy matrices)
+    '''
+    def updateContactForcesInViewer(self, contact_names, contact_points, contact_forces):
+        if(self.time_step%int(self.VIEWER_DT/self.dt)==0):
+            for (name, p, f) in zip(contact_names, contact_points, contact_forces):
+                if(name not in self.contact_force_arrow_names):
+                    self.viewer.addArrow(name, self.CONTACT_FORCE_ARROW_RADIUS, p, p+self.CONTACT_FORCE_ARROW_SCALE*f, self.CONTACT_FORCE_ARROW_COLOR);
+                    self.viewer.setVisibility(name, "ON");
+                    self.contact_force_arrow_names += [name];
+                else:
+                    self.viewer.moveArrow(name, p, p+self.CONTACT_FORCE_ARROW_SCALE*f);
+                    
+            for name in self.contact_force_arrow_names:
+                if(name not in contact_names):
+                    self.viewer.setVisibility(name, "OFF");
+                    
+            self.contact_force_arrow_names = list(contact_names);
