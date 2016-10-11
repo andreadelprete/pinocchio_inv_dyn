@@ -43,17 +43,17 @@ class Viewer(object):
     COM_SPHERE_COLOR = (1, 0, 0, 1);
 
     CAMERA_LOW_PASS_FILTER_CUT_FREQUENCY = 10.0;
-    CAMERA_FOLLOW_ROBOT = 'robot1';   # name of the robot to follow with the camera
+    CAMERA_FOLLOW_ROBOT = '';   # name of the robot to follow with the camera
     CAMERA_LOOK_AT_HEIGHT = 0.5;           # height the camera should look at when following a robot
     CAMERA_REL_POS = [4, 2, 1.75];  # distance from robot to camera
     CAMERA_LOOK_AT_OFFSET = [0, 0]; # offset to robot xy position looked by camera    
     
     objectsAttachedToJoints = [];
+    arrow_radius = {};  # dictionary containing the radius of all existing arrows
 
     def __init__(self, name, robotWrapper, robotName='robot1'):
         self.name = name;
         self.filter = FirstOrderLowPassFilter(0.002, self.CAMERA_LOW_PASS_FILTER_CUT_FREQUENCY, mat_zeros(2));
-        self.arrow_radius = {};
         if(ENABLE_VIEWER):
             self.robot = robotWrapper;
             self.robot.initDisplay("world/"+robotName, loadModel=False);
