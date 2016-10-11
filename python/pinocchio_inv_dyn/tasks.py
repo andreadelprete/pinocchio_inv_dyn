@@ -78,6 +78,14 @@ class SE3Task(Task):
     M_ref, v_ref, a_ref  = self._ref_trajectory(t);
     p_error = errorInSE3(oMi, M_ref);
     return p_error.vector[self._mask];
+    
+  def velocityError(self, t):
+    oMi = self.robot.framePosition(self._frame_id);
+    self._gMl.rotation = oMi.rotation
+    v_frame = self.robot.frameVelocity(self._frame_id);
+    M_ref, v_ref, a_ref  = self._ref_trajectory(t);
+    v_error = v_frame - self._gMl.actInv(v_ref)
+    return v_error.vector[self._mask];
 
   def dyn_value(self, t, q, v, local_frame = True):
     # Get the current configuration of the link
@@ -88,7 +96,7 @@ class SE3Task(Task):
     M_ref, v_ref, a_ref  = self._ref_trajectory(t)
 
     # Transformation from local to world    
-    self._gMl.rotation = oMi.rotation    
+    self._gMl.rotation = oMi.rotation 
 
     # Compute error acceleration desired
     p_error= errorInSE3(oMi, M_ref);

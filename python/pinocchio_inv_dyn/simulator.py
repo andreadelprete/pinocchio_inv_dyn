@@ -132,12 +132,7 @@ class Simulator (object):
         self.S_T[6:, :] = np.matlib.eye(n);
         self.M          = self.r.mass(self.q);
         self.J_com      = zeros((3,n));
-        
-#        self.constr_rfoot.opPointModif.position.recompute(t+1);
-#        self.constr_rfoot.ref = self.constr_rfoot.opPointModif.position.value;        
-#        self.constr_lfoot.opPointModif.position.recompute(t+1);
-#        self.constr_lfoot.ref = self.constr_lfoot.opPointModif.position.value;
-        
+
         if(self.DETECT_CONTACT_POINTS==False):
             self.rigidContactConstraints = []; #self.constr_rfoot, self.constr_lfoot];
         else:
@@ -179,21 +174,7 @@ class Simulator (object):
         self.nv = self.r.nv;
         self.na = self.nv-6 if self.freeFlyer else self.nv;
         
-#        K_C = 1e2;
-#        self.constr_rfoot = createAndInitializeMetaTaskDyn6D('c_rf_'+self.name, dt, self.r.dynamic, 'right-ankle', H_FOOT_2_SOLE, K_C);
-#        self.constr_lfoot = createAndInitializeMetaTaskDyn6D('c_lf_'+self.name, dt, self.r.dynamic, 'left-ankle', H_FOOT_2_SOLE, K_C);
-#        self.constr_rhand = createAndInitializeMetaTaskDyn6D('c_rw_'+self.name, dt, self.r.dynamic, 'right-wrist', H_WRIST_2_GRIPPER, K_C);
-        
-#        flags = '111111';
-#        constr_rf_fr = createAndInitializeMetaTaskDyn6D('c_rf_fr_'+self.name, dt, self.r.dynamic, 'right-ankle', H_RFOOT_2_FR_CORNER, K_C, flags);
-#        constr_rf_fl = createAndInitializeMetaTaskDyn6D('c_rf_fl_'+self.name, dt, self.r.dynamic, 'right-ankle', H_RFOOT_2_FL_CORNER, K_C, flags);
-#        constr_rf_hr = createAndInitializeMetaTaskDyn6D('c_rf_hr_'+self.name, dt, self.r.dynamic, 'right-ankle', H_RFOOT_2_HR_CORNER, K_C, flags);
-#        constr_rf_hl = createAndInitializeMetaTaskDyn6D('c_rf_hl_'+self.name, dt, self.r.dynamic, 'right-ankle', H_RFOOT_2_HL_CORNER, K_C, flags);
-#        constr_lf_fr = createAndInitializeMetaTaskDyn6D('c_lf_fr_'+self.name, dt, self.r.dynamic, 'left-ankle', H_LFOOT_2_FR_CORNER, K_C, flags);
-#        constr_lf_fl = createAndInitializeMetaTaskDyn6D('c_lf_fl_'+self.name, dt, self.r.dynamic, 'left-ankle', H_LFOOT_2_FL_CORNER, K_C, flags);
-#        constr_lf_hr = createAndInitializeMetaTaskDyn6D('c_lf_hr_'+self.name, dt, self.r.dynamic, 'left-ankle', H_LFOOT_2_HR_CORNER, K_C, flags);
-#        constr_lf_hl = createAndInitializeMetaTaskDyn6D('c_lf_hl_'+self.name, dt, self.r.dynamic, 'left-ankle', H_LFOOT_2_HL_CORNER, K_C, flags);
-#        self.candidateContactConstraints = [constr_rf_fr, constr_rf_fl, constr_rf_hr, constr_rf_hl, 
+#        self.candidateContactConstraints = [constr_rf_fr, constr_rf_fl, constr_rf_hr, constr_rf_hl,
 #                                            constr_lf_fr, constr_lf_fl, constr_lf_hr, constr_lf_hl];
         self.viewer=Viewer(self.name, self.r);
         
@@ -567,23 +548,19 @@ class Simulator (object):
 #            self.f = y[n+6:n+6+k];
 #            
 #        return self.integrateAcc(t, dt, self.dv, self.f, self.tau);
-            
+    
     def integrateAcc(self, t, dt, dv, f, tau, updateViewer=True):
         res = [];
         self.t = t;
         self.time_step += 1;
         self.dv = np.matrix.copy(dv);
         
-        # replace with se3.integrate(robot.model, q, dt*v)
-        ''' Integrate velocity '''
-        M = se3.SE3(se3.Quaternion(self.q[6,0], self.q[3,0], self.q[4,0], self.q[5,0]).matrix(), self.q[:3,0]);
-        dM = exp(dt*self.v[:6,0]);
-        M = M * dM;
-        self.q[:3]  = M.translation;
-        self.q[3:7] = se3.Quaternion(M.rotation).coeffs();
-        self.q[7:] += dt*self.v[6:,0];
-        ''' Integrate acceleration '''
-        self.v     += dt*self.dv;
+        if(abs(norm(self.q[3:7])-1.0) > EPS):
+            print "SIMULATOR ERROR Time %.3f "%t, "norm of quaternion is not 1=%f" % norm(self.q[3:7]);
+            
+        ''' Integrate velocity and acceleration '''
+        self.q  = se3.integrate(self.r.model, self.q, dt*self.v);
+        self.v += dt*self.dv;
         
         ''' Check for violation of torque limits'''
 #        for i in range(self.n):
