@@ -95,7 +95,6 @@ class InvDynFormulation (object):
     ddx_com = [];   # com 3d acceleration
     cp = [];        # capture point
 
-    mass = 0;
     J_com = [];     # com Jacobian
     Jc = [];        # contact Jacobian
     x_c = [];       # contact points
@@ -122,6 +121,9 @@ class InvDynFormulation (object):
     
     B_conv_hull = None;     # 2d convex hull of contact points: B_conv_hull*x + b_conv_hull >= 0
     b_conv_hull = None;
+    
+    contact_points = None;  # 3xN matrix containing the contact points in world frame
+    contact_normals = None; # 3xN matrix containing the contact normals in world frame
 
     
     def updateInequalityData(self, updateConstrainedDynamics=True):
@@ -293,19 +295,20 @@ class InvDynFormulation (object):
     def updateConvexHull(self):
         ''' Compute contact points in world frame '''
         ncp = np.sum([p.shape[1] for p in self.rigidContactConstraints_p]);
-        self.contact_points = zeros((3,ncp));
+        self.contact_points  = zeros((3,ncp));
+        self.contact_normals = zeros((3,ncp));
         
         if(ncp==0):
             self.B_conv_hull = zeros((0,2));
             self.b_conv_hull = zeros(0);
         else:
-            ii = 0;
-            for (i,constr) in enumerate(self.rigidContactConstraints):
+            i = 0;
+            for (constr, P, N) in zip(self.rigidContactConstraints, self.rigidContactConstraints_p, self.rigidContactConstraints_N):
                 oMi = self.r.framePosition(constr._frame_id);
-                P = self.rigidContactConstraints_p[i];
                 for j in range(P.shape[1]):
-                    self.contact_points[:,ii] = oMi.act(P[:,j]);
-                    ii += 1;
+                    self.contact_points[:,i]  = oMi.act(P[:,j]);
+                    self.contact_normals[:,i] = oMi.rotation * N[:,j];
+                    i += 1;
             
             ''' compute convex hull of vertical projection of contact points'''
             (self.B_conv_hull, self.b_conv_hull) = compute_convex_hull(self.contact_points[:2,:].A);
