@@ -201,7 +201,12 @@ def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_r
                 - else                                      t_ub=t, t=(t_ub+t_lb)/2
                 
 '''
+
 def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER=1000, DO_PLOTS=False, verb=0, eliminate_redundancies=False):
+    assert mass>0.0
+    assert T_0>0.0
+    assert mu>0.0
+    
     c0 = np.asarray(c0).squeeze();
     dc0 = np.asarray(dc0).squeeze();
     contact_points = np.asarray(contact_points);
@@ -254,8 +259,8 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
             d[i] /= abs(b[i]);
             b[i] /= abs(b[i]);
         else:
-            print "ERROR: cannot normalize inequality because coefficient of DDalpha is almost zero", b[i];
-            return (False, c0, dc0);
+            print "WARNING: cannot normalize %d-th inequality because coefficient of DDalpha is almost zero"%i, b[i];
+#            return (False, c0, dc0);
     
     
     ''' Initialize: alpha=0, Dalpha=||dc0|| '''
