@@ -177,6 +177,7 @@ class Simulator (object):
 #        self.candidateContactConstraints = [constr_rf_fr, constr_rf_fl, constr_rf_hr, constr_rf_hl,
 #                                            constr_lf_fr, constr_lf_fl, constr_lf_hr, constr_lf_hl];
         self.viewer=Viewer(self.name, self.r);
+        self.viewer.updateRobotConfig(q);
         
         self.reset(0, q, v, dt);
         
@@ -726,7 +727,15 @@ class Simulator (object):
         assert com.shape[0]==3, "com should be a 3x1 matrix"
         if(self.time_step%int(self.VIEWER_DT/self.dt)==0):
             if(self.DISPLAY_COM):
-                self.viewer.updateObjectConfig('com', (com[0,0], com[1,0], com[2,0], 0,0,0,1));
+                self.viewer.updateObjectConfig('com', (com[0,0], com[1,0], com[2,0], 0.,0.,0.,1.));
+    
+    def updateCapturePointPositionInViewer(self, cp):
+        assert cp.shape[0]==2, "capture point should be a 2x1 matrix"
+        if(self.time_step%int(self.VIEWER_DT/self.dt)==0):
+            if(self.DISPLAY_CAPTURE_POINT):
+                self.viewer.updateObjectConfig('cp', (cp[0,0], cp[1,0], 0., 0.,0.,0.,1.));
+                            
+    
 
     ''' Update the arrows representing the specified contact forces in the viewer.
         If the arrows have not been created yet, it creates them.
@@ -746,7 +755,7 @@ class Simulator (object):
                 else:
                     self.viewer.moveArrow(name, p, p+self.CONTACT_FORCE_ARROW_SCALE*f);
                     
-            for name in self.contact_force_arrow_names:
+            for name in self.viewer.arrow_radius:
                 if(name not in contact_names):
                     self.viewer.setVisibility(name, "OFF");
                     
