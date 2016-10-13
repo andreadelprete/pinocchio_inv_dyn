@@ -177,7 +177,6 @@ class Simulator (object):
 #        self.candidateContactConstraints = [constr_rf_fr, constr_rf_fl, constr_rf_hr, constr_rf_hl,
 #                                            constr_lf_fr, constr_lf_fl, constr_lf_hr, constr_lf_hl];
         self.viewer=Viewer(self.name, self.r);
-        self.viewer.updateRobotConfig(q);
         
         self.reset(0, q, v, dt);
         
