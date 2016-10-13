@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cdd
 import plot_utils as plut
+from polytope_conversion_utils import poly_face_to_span, NotPolyFace
 
 NUMBER_TYPE = 'float'  # 'float' or 'fraction'
 
@@ -118,28 +119,52 @@ def plot_inequalities(A, b, x_bounds, y_bounds, ls='--', color='k', ax=None, lw=
 
 ''' Plot the polytope A*x<=b with vectices V '''
 def plot_polytope(A, b, V=None, color='b', ax=None, plotLines=True, lw=4):
+    A = np.asarray(A);
+    b = np.asarray(b);
+    
     if(ax==None):
         f, ax = plut.create_empty_figure();
     
+    if(V==None):
+        try:
+            V = poly_face_to_span(A,b).T;
+        except (ValueError,NotPolyFace) as e:
+            print "WARNING: "+str(e);
+
+    if(V==None):
+        X_MIN = -1.;
+        X_MAX = 1.;
+        Y_MIN = -1.;
+        Y_MAX = 1.;
+    else:
+        X_MIN = np.min(V[:,0]);
+        X_MAX = np.max(V[:,0]);
+        X_MIN -= 0.1*(X_MAX-X_MIN);
+        X_MAX += 0.1*(X_MAX-X_MIN);
+    
+        Y_MIN = np.min(V[:,1]);
+        Y_MAX = np.max(V[:,1]);
+        Y_MIN -= 0.1*(Y_MAX-Y_MIN);
+        Y_MAX += 0.1*(Y_MAX-Y_MIN);
+    
     if(plotLines):
-        plot_inequalities(A, b, [-1,1], [-1,1], color=color, ls='--', ax=ax, lw=lw);
+        plot_inequalities(A, b, [X_MIN,X_MAX], [Y_MIN,Y_MAX], color=color, ls='--', ax=ax, lw=lw);
     n = b.shape[0];    
     if(n<2):
         return (ax,None);
-        
-    if(V==None):
-        V = np.zeros((n,2));
+    
+    line = None;
+    if(V!=None):
+        xx = np.zeros(2);
+        yy = np.zeros(2);
         for i in range(n):
-            V[i,:] = find_intersection(A[i,:], b[i], A[(i+1)%n,:], b[(i+1)%n]);
-                                       
-    xx = np.zeros(2);
-    yy = np.zeros(2);
-    for i in range(n):
-        xx[0] = V[i,0];
-        xx[1] = V[(i+1)%n,0];
-        yy[0] = V[i,1];
-        yy[1] = V[(i+1)%n,1];
-        line, = ax.plot(xx, yy, color=color, ls='-', lw=2*lw);
+            xx[0] = V[i,0];
+            xx[1] = V[(i+1)%n,0];
+            yy[0] = V[i,1];
+            yy[1] = V[(i+1)%n,1];
+            line, = ax.plot(xx, yy, color='r', ls='o', markersize=30); #, lw=2*lw);
+        ax.set_xlim([X_MIN, X_MAX]);
+        ax.set_ylim([Y_MIN, Y_MAX]);
     
     return (ax, line);
     
