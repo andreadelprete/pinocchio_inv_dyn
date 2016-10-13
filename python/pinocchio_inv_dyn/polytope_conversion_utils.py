@@ -139,6 +139,10 @@ def poly_face_to_span(F,f):
     F_cdd.rep_type = RepType.INEQUALITY
     P = Polyhedron(F_cdd)
     V = array(P.get_generators())
+    if(V.shape[0]==0):
+        print "V.shape", V.shape, "F.shape", F.shape, "f.shape", f.shape;
+        raise ValueError("This polytope seems to have no vertices"); 
+        
     for i in xrange(V.shape[0]):
         if V[i, 0] != 1:  # 1 = vertex, 0 = ray
             raise NotPolyFace(F)
