@@ -4,19 +4,15 @@ from numpy.random import random
 from polytope_conversion_utils import cone_span_to_face
 from pinocchio_inv_dyn.robot_wrapper import RobotWrapper
 import pinocchio as se3
+from pinocchio.utils import zero as zeros
 from acc_bounds_util_multi_dof import computeAccLimits
 from sot_utils import compute6dContactInequalities, crossMatrix
 from first_order_low_pass_filter import FirstOrderLowPassFilter
 from convex_hull_util import compute_convex_hull, plot_convex_hull
+from geom_utils import plot_polytope
+from multi_contact_stability_criterion_utils import compute_GIWC, compute_support_polygon
 
 EPS = 1e-4;
-
-def zeros(shape):
-    if(isinstance(shape, np.int)):
-        return np.matlib.zeros((shape,1));
-    elif(len(shape)==2):
-        return np.matlib.zeros(shape);
-    raise TypeError("The shape is not an int nor a list of two numbers");
     
 class InvDynFormulation (object):
     name = '';
@@ -119,15 +115,15 @@ class InvDynFormulation (object):
     tasks = [];
     task_weights = [];
     
-    B_conv_hull = None;     # 2d convex hull of contact points: B_conv_hull*x + b_conv_hull >= 0
-    b_conv_hull = None;
+    B_sp = None;     # 2d support polygon: B_sp*x + b_sp >= 0
+    b_sp = None;
     
     contact_points = None;  # 3xN matrix containing the contact points in world frame
     contact_normals = None; # 3xN matrix containing the contact normals in world frame
 
     
     def updateInequalityData(self, updateConstrainedDynamics=True):
-        self.updateConvexHull();
+        self.updateSupportPolygon();
         
         self.m_in = 0;                              # number of inequalities
         c = len(self.rigidContactConstraints);      # number of unilateral contacts
@@ -169,8 +165,8 @@ class InvDynFormulation (object):
             self.ub = zeros(self.na) + 1e100;
             
         if(self.ENABLE_CAPTURE_POINT_LIMITS):
-            self.ind_cp_in = range(self.m_in, self.m_in+self.b_conv_hull.size);
-            self.m_in += self.b_conv_hull.size;
+            self.ind_cp_in = range(self.m_in, self.m_in+self.b_sp.size);
+            self.m_in += self.b_sp.size;
         else:
             self.ind_cp_in = [];
             
@@ -292,38 +288,59 @@ class InvDynFormulation (object):
         raise ValueError("[InvDynForm] ERROR: task %s cannot be removed because it does not exist!" % task_name);
         
         
-    def updateConvexHull(self):
-        ''' Compute contact points in world frame '''
+    def updateSupportPolygon(self):
+        ''' Compute contact points and contact normals in world frame '''
         ncp = np.sum([p.shape[1] for p in self.rigidContactConstraints_p]);
         self.contact_points  = zeros((3,ncp));
         self.contact_normals = zeros((3,ncp));
+        mu_s = zeros(ncp);
         
         if(ncp==0):
-            self.B_conv_hull = zeros((0,2));
-            self.b_conv_hull = zeros(0);
+            self.B_sp = zeros((0,2));
+            self.b_sp = zeros(0);
         else:
             i = 0;
-            for (constr, P, N) in zip(self.rigidContactConstraints, self.rigidContactConstraints_p, self.rigidContactConstraints_N):
+            for (constr, P, N, mu) in zip(self.rigidContactConstraints, self.rigidContactConstraints_p, 
+                                          self.rigidContactConstraints_N, self.rigidContactConstraints_mu):
                 oMi = self.r.framePosition(constr._frame_id);
                 for j in range(P.shape[1]):
                     self.contact_points[:,i]  = oMi.act(P[:,j]);
                     self.contact_normals[:,i] = oMi.rotation * N[:,j];
+                    mu_s[i,0] = mu[0];
                     i += 1;
             
-            ''' compute convex hull of vertical projection of contact points'''
-            (self.B_conv_hull, self.b_conv_hull) = compute_convex_hull(self.contact_points[:2,:].A);
+            avg_z = np.mean(self.contact_points[2,:]);
+            if(np.max(np.abs(self.contact_points[2,:] - avg_z)) < 1e-3):
+                ''' Contact points are coplanar so I can simply compute the convex hull of 
+                    vertical projection of contact points'''
+                (self.B_sp, self.b_sp) = compute_convex_hull(self.contact_points[:2,:].A);
+            else:
+                (H,h) = compute_GIWC(self.contact_points.T, self.contact_normals.T, mu_s);
+                (self.B_sp, self.b_sp) = compute_support_polygon(H, h, self.M[0,0], np.array([0.,0.,-9.81]), eliminate_redundancies=True);
+                self.B_sp *= -1.0;                
             
             # normalize inequalities
-            for i in range(self.B_conv_hull.shape[0]):
-                tmp = np.linalg.norm(self.B_conv_hull[i,:]);
+            for i in range(self.B_sp.shape[0]):
+                tmp = np.linalg.norm(self.B_sp[i,:]);
                 if(tmp>1e-6):
-                    self.B_conv_hull[i,:] /= tmp;
-                    self.b_conv_hull[i]   /= tmp;
+                    self.B_sp[i,:] /= tmp;
+                    self.b_sp[i]   /= tmp;
 
-#            plot_convex_hull(self.B_conv_hull, self.b_conv_hull, self.contact_points[:2,:].A.T);
-            self.B_conv_hull = np.matrix(self.B_conv_hull);
-            self.b_conv_hull = np.matrix(self.b_conv_hull).T;
+#            self.plotSupportPolygon();
+            self.B_sp = np.matrix(self.B_sp);
+            self.b_sp = np.matrix(self.b_sp).T;
             
+    ''' Get the matrix B and vector b representing the 2d support polygon as B*x+b>=0 '''
+    def getSupportPolygon(self):
+        return (np.matrix.copy(self.B_sp), np.matrix.copy(self.b_sp));
+        
+    def plotSupportPolygon(self):
+        import matplotlib.pyplot as plt
+        (ax,line) = plot_polytope(-self.B_sp, self.b_sp); 
+        ax.scatter(self.x_com[0,0], self.x_com[1,0], c='r', marker='o', s=100);
+        for i in range(self.contact_points.shape[1]):
+            ax.scatter(self.contact_points[0,i], self.contact_points[1,i], c='k', marker='o', s=100);
+        plt.show();
         
         
     ''' ********** ENABLE OR DISABLE INEQUALITY CONSTRAINTS ********** '''
@@ -367,7 +384,7 @@ class InvDynFormulation (object):
             for c in self.bilateralContactConstraints:
                 Mref = self.r.position(q, c._link_id, update_geometry=False);
                 c.refTrajectory.setReference(Mref);
-            self.updateConvexHull();
+            self.updateSupportPolygon();
             
         return self.q;
     
@@ -397,7 +414,10 @@ class InvDynFormulation (object):
 #        self.h          += self.JOINT_FRICTION_COMPENSATION_PERCENTAGE*np.dot(np.array(JOINT_VISCOUS_FRICTION), self.v);
         self.dx_com     = np.dot(self.J_com, self.v);
         com_z           = self.x_com[2]; #-np.mean(self.contact_points[:,2]);
-        self.cp         = self.x_com[:2] + self.dx_com[:2]/np.sqrt(9.81/com_z);
+        if(com_z>0.0):
+            self.cp         = self.x_com[:2] + self.dx_com[:2]/np.sqrt(9.81/com_z);
+        else:
+            self.cp = zeros(2);
         self.updateConstrainedDynamics();
         
 
@@ -491,7 +511,7 @@ class InvDynFormulation (object):
         ensures that the capture point at the next time step will lie
         inside the support polygon. Note that the vector dv contains the
         accelerations of base+joints of the robot. This methods assumes that
-        x_com, dx_com, J_com, B_conv_hull and b_conv_hull have been already computed.
+        x_com, dx_com, J_com, B_sp and b_sp have been already computed.
     '''
     def createCapturePointInequalities(self, footSizes = None):    
         dt      = self.dt;
@@ -499,8 +519,8 @@ class InvDynFormulation (object):
         x_com   = self.x_com[0:2];  # only x and y coordinates
         dx_com  = self.dx_com[0:2];
     
-        B    = (0.5*dt*dt + dt/omega)*np.dot(self.B_conv_hull, self.J_com[0:2,:]);
-        b    = self.b_conv_hull + np.dot(self.B_conv_hull, x_com + (dt+1/omega)*dx_com);
+        B    = (0.5*dt*dt + dt/omega)*np.dot(self.B_sp, self.J_com[0:2,:]);
+        b    = self.b_sp + np.dot(self.B_sp, x_com + (dt+1/omega)*dx_com);
         return (B,b);
         
 
@@ -570,7 +590,6 @@ class InvDynFormulation (object):
     '''
     def createInequalityConstraints(self):
         n = self.na;
-        k = self.k;
 
         if(self.ENABLE_JOINT_LIMITS):
             (B_q, b_q) = self.createJointAccInequalitiesViability();
