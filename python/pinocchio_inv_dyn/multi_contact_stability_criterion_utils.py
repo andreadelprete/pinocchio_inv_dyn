@@ -27,6 +27,8 @@ import cProfile
 
 EPS = 1e-5;
 
+''' Find a position of the center of mass that is in static equilibrium.
+'''
 def find_static_equilibrium_com(mass, com_lb, com_ub, H, h, MAX_ITER=1000):
     FOUND_STATIC_COM = False;
     g_vector = np.array([0,0,-9.81]);
@@ -43,6 +45,7 @@ def find_static_equilibrium_com(mass, com_lb, com_ub, H, h, MAX_ITER=1000):
             print "ERROR: Could not find com position in static equilibrium in %d iterations."%MAX_ITER;
             return (False,c0);
     return (True,c0);
+
 
 ''' Generate the 4 contact points and the associated normal directions
     for a rectangular contact.
@@ -68,9 +71,11 @@ def generate_rectangle_contacts(lx, ly, pos, rpy):
     N = np.vstack([n, n, n, n]);
     return (p,N);
 
+
 ''' Generate the contact points and the contact normals associated to randomly generated rectangular contact surfaces
 '''
-def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS=False):
+def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, 
+                      RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS=False):
     contact_pos = np.zeros((N_CONTACTS, 3));
     contact_rpy = np.zeros((N_CONTACTS, 3));
     p = np.zeros((4*N_CONTACTS,3)); # contact points
@@ -95,10 +100,11 @@ def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTAC
                 break;
     return (p, N);
 
+
 ''' Compute the gravito-inertial wrench cone.
     @param contact_points Nx3 matrix containing the contact points
     @param contact_normals Nx3 matrix containing the contact normals
-    @param mu Friction coefficient
+    @param mu A scalar friction coefficient, or an array of friction coefficients (one for each contact point)
     @param cg Number of generator for the friction cone of each contact point
     @param USE_DIAGONAL_GENERATORS If True generate the generators turned of 45 degrees
     @return (H,h) Matrix and vector defining the GIWC as H*w <= h
@@ -106,11 +112,17 @@ def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTAC
 def compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=False, USE_DIAGONAL_GENERATORS=True):
     assert contact_points.shape[1]==3
     assert contact_normals.shape[1]==3
+    assert contact_points.shape[0]==contact_normals.shape[0]
+    
     contact_points = np.asarray(contact_points);
     contact_normals = np.asarray(contact_normals);
+    nContacts = contact_points.shape[0];
+    if(isinstance(mu, (list, tuple, np.ndarray))):
+        mu = np.asarray(mu).squeeze();
+    else:
+        mu = mu*np.ones(nContacts);        
     
     ''' compute generators '''
-    nContacts = contact_points.shape[0];
     #gamma = atan(mu);   # half friction cone angle
     cg = 4;
     nGen = nContacts*cg;           # number of generators
@@ -121,23 +133,23 @@ def compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=Fal
     for i in range(nContacts):
         ''' compute tangent directions '''
         contact_normals[i,:]  = contact_normals[i,:]/np.linalg.norm(contact_normals[i,:]);
-        T1[i,:] = np.cross(contact_normals[i,:], [0,1,0]);
-        if(np.linalg.norm(T1[i,:])<1e-5):
-            T1[i,:] = np.cross(contact_normals[i,:], [1,0,0]);
+        T1[i,:] = np.cross(contact_normals[i,:], [0.,1.,0.]);
+        if(np.linalg.norm(T1[i,:])<EPS):
+            T1[i,:] = np.cross(contact_normals[i,:], [1.,0.,0.]);
         T1[i,:] = T1[i,:]/np.linalg.norm(T1[i,:]);
         T2[i,:] = np.cross(contact_normals[i,:], T1[i,:]);
         T2[i,:] = T2[i,:]/np.linalg.norm(T2[i,:]);
         
         if(USE_DIAGONAL_GENERATORS):
-            S[:,cg*i+0] =  muu*T1[i,:] + muu*T2[i,:] + contact_normals[i,:];
-            S[:,cg*i+1] =  muu*T1[i,:] - muu*T2[i,:] + contact_normals[i,:];
-            S[:,cg*i+2] = -muu*T1[i,:] + muu*T2[i,:] + contact_normals[i,:];
-            S[:,cg*i+3] = -muu*T1[i,:] - muu*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+0] =  muu[i]*T1[i,:] + muu[i]*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+1] =  muu[i]*T1[i,:] - muu[i]*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+2] = -muu[i]*T1[i,:] + muu[i]*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+3] = -muu[i]*T1[i,:] - muu[i]*T2[i,:] + contact_normals[i,:];
         else:
-            S[:,cg*i+0] =   mu*T1[i,:] + contact_normals[i,:];
-            S[:,cg*i+1] =  -mu*T1[i,:] + contact_normals[i,:];
-            S[:,cg*i+2] =   mu*T2[i,:] + contact_normals[i,:];
-            S[:,cg*i+3] = - mu*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+0] =   mu[i]*T1[i,:] + contact_normals[i,:];
+            S[:,cg*i+1] =  -mu[i]*T1[i,:] + contact_normals[i,:];
+            S[:,cg*i+2] =   mu[i]*T2[i,:] + contact_normals[i,:];
+            S[:,cg*i+3] = - mu[i]*T2[i,:] + contact_normals[i,:];
         
         S[:,cg*i+0] = S[:,cg*i+0]/np.linalg.norm(S[:,cg*i+0]);
         S[:,cg*i+1] = S[:,cg*i+1]/np.linalg.norm(S[:,cg*i+1]);
@@ -160,6 +172,30 @@ def compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=Fal
     return (H,h);
     
     
+''' Compute the 2d support polygon A*c<=b given the gravito-inertial wrench 
+    cone (GIWC) as H*w <= h.
+'''
+def compute_support_polygon(H, h, mass, g_vector, eliminate_redundancies=False):
+    ''' Project inequalities from 6d to 2d x-y com space.
+        The com wrench to maintain static equilibrium is an affine function
+        of the com position c:
+            w = D*c+d
+        Substituting this into the GIWC inequalities we get:
+            H*w <= h
+            H*D*c + H*d <= h
+            H*D*c <= h - H*d
+    '''
+    D = np.zeros((6,3));
+    d = np.zeros(6);
+    D[3:,:] = -mass*crossMatrix(g_vector);
+    d[:3]   = mass*g_vector;
+    A = np.dot(H, D[:,:2]);
+    b = h - np.dot(H, d);
+    if(eliminate_redundancies):
+        (A,b) = eliminate_redundant_inequalities(A,b);
+    return (A,b);
+    
+    
 ''' Compute the inequalities A*x<=b defining the polytope of feasible CoM accelerations
     assuming zero rate of change of angular momentum.
     @param c0 Current com position
@@ -169,13 +205,13 @@ def compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=Fal
     @param g_vector Gravity vector
     @return (A,b)
 '''
-def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_redundant_ineq=False):
+def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_redundancies=False):
     K = np.zeros((6,3));
     K[:3,:] = mass*np.identity(3);
     K[3:,:] = mass*crossMatrix(com_pos);
     b = h - np.dot(H,np.dot(K,g_vector)); #constant term of F
     A = np.dot(-H,K); #matrix multiplying com acceleration 
-    if(eliminate_redundant_ineq):
+    if(eliminate_redundancies):
         (A,b) = eliminate_redundant_inequalities(A,b);
     return A,b;
     
