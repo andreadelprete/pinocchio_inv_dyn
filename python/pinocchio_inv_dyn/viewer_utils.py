@@ -162,7 +162,7 @@ class Viewer(object):
             self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
             self.robot.viewer.gui.refresh();
         
-    def addSphere(self,name, radius, xyz, rpy, color=(0,0,0,1.0), lightingMode='ON'):
+    def addSphere(self,name, radius, xyz, rpy=mat_zeros(3), color=(0,0,0,1.0), lightingMode='ON'):
         if(ENABLE_VIEWER):
             position = xyzRpyToViewerConfig(xyz, rpy);
             self.robot.viewer.gui.addSphere('world/'+name, radius, color);
