@@ -686,7 +686,7 @@ class Simulator (object):
 #                    res = res + [ForceConstraintViolation(self.t*self.dt, self.rigidContactConstraints[i].name+' Fz', f[i*6:i*6+6], zeros(6))];
 #                            
         ''' check for violations of joint limits '''
-        ind_vel = np.where(np.abs(self.v) > self.DQ_MAX)[0].A.squeeze();
+        ind_vel = np.where(np.abs(self.v) > self.DQ_MAX)[0].squeeze();
         ind_vel = np.array([ind_vel]) if len(ind_vel.shape)==0 else ind_vel;
         for i in ind_vel:
             res = res + [VelocityConstraintViolation(self.t*self.dt, i-7, self.v[i], self.dv[i])];
