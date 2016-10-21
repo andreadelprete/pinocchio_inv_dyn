@@ -119,7 +119,7 @@ class AbstractSolver (object):
         else:
             print "[%s] ERROR. Wrong size of the bound vectors, %d and %d rather than %d" % (self.name,lb.shape[0], ub.shape[0],self.n);
 #        self.bounds = self.n*[(-1e10,1e10)];
-        if(x0==None):
+        if(x0 is None):
             self.x0 = np.zeros(self.n);
         else:
             self.x0 = x0.squeeze();
@@ -133,7 +133,7 @@ class AbstractSolver (object):
             self.qpOasesSolver.setOptions(self.options);
             self.initialized = False;
             
-        if(maxIter==None):
+        if(maxIter is None):
             maxIter = self.maxIter;
         self.iter    = 0;
         self.qpTime  = 0.0;
@@ -203,7 +203,7 @@ class AbstractSolver (object):
             qpUnfeasible    = False;
             if((ineq_marg<-self.INEQ_VIOLATION_THR).any()):
                 qpUnfeasible = True;
-                if(x0!=None):
+                if(x0 is not None):
                     ineq_marg       = self.f_inequalities(x0);
                     if(not(ineq_marg<-self.INEQ_VIOLATION_THR).any()):
                         if(self.verb>0):
@@ -228,7 +228,7 @@ class AbstractSolver (object):
                 qpUnfeasible    = False;
                 if((ineq_marg<-self.INEQ_VIOLATION_THR).any()):
                     ''' if the solution found is unfeasible check whether the initial guess is feasible '''
-                    if(x0!=None):
+                    if(x0 is not None):
                         x = np.copy(x0);
                         ineq_marg       = self.f_inequalities(x);
                         ineq_marg[self.softInequalityIndexes] = 1.0;
@@ -442,7 +442,7 @@ class AbstractSolver (object):
         self.initialized = False;
         
     def check_grad(self, x=None):
-        if(x==None):
+        if(x is None):
             x = np.random.rand(self.n);
         grad = self.f_cost_grad(x);
         grad_fd = approx_fprime(x,self.f_cost,self.epsilon);
@@ -451,7 +451,7 @@ class AbstractSolver (object):
         return (grad, grad_fd);
  
     def check_hess(self, x=None):
-        if(x==None):
+        if(x is None):
             x = np.random.rand(self.n);
         hess = self.f_cost_hess(x);
         hess_fd = approx_jacobian(x,self.f_cost_grad,self.epsilon);
