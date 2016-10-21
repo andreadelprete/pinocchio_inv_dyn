@@ -104,5 +104,31 @@ class RobotWrapper(PinocchioRobotWrapper):
 
         # Finally, refresh the layout to obtain your first rendering.
         self.viewer.gui.refresh()
+      
+    def deactivateCollisionPairs(self, collision_pair_indexes):
+        for i in collision_pair_indexes:
+            self.collision_data.deactivateCollisionPair(i);
+            
+    def addAllCollisionPairs(self):
+        self.collision_model.addAllCollisionPairs();
+        self.collision_data = se3.GeometryData(self.collision_model);
+        
+    def isInCollision(self, q, stop_at_first_collision=True):
+        return se3.computeCollisions(self.model, self.data, self.collision_model, self.collision_data, q, stop_at_first_collision);
+
+    def findFirstCollisionPair(self, consider_only_active_collision_pairs=True):
+        for i in range(len(self.collision_model.collisionPairs)):
+            if(not consider_only_active_collision_pairs or self.collision_data.activeCollisionPairs[i]):
+                if(se3.computeCollision(self.collision_model, self.collision_data, i)):
+                    return (i, self.collision_model.collisionPairs[i]);
+        return None;
+        
+    def findAllCollisionPairs(self, consider_only_active_collision_pairs=True):
+        res = [];
+        for i in range(len(self.collision_model.collisionPairs)):
+            if(not consider_only_active_collision_pairs or self.collision_data.activeCollisionPairs[i]):
+                if(se3.computeCollision(self.collision_model, self.collision_data, i)):
+                    res += [(i, self.collision_model.collisionPairs[i])];
+        return res;
 
 __all__ = ['RobotWrapper']
