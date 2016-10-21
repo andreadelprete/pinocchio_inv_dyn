@@ -85,7 +85,7 @@ def updateConstraints(t, i, q, v, invDynForm, contacts):
         
         Pi = conf.DEFAULT_CONTACT_POINTS;   # contact points is expressed in local frame
         Ni = oMi.rotation.T * conf.DEFAULT_CONTACT_NORMALS; # contact normal is in world frame
-        print "    contact point in world frame:", oMi.act_point(Pi).T, (oMi.rotation * Ni).T;
+        print "    contact point in world frame:", oMi.act(Pi).T, (oMi.rotation * Ni).T;
         invDynForm.addUnilateralContactConstraint(constr, Pi, Ni, conf.fMin, conf.mu);
         if(t>0):
             invDynForm.removeTask(name);
@@ -124,7 +124,7 @@ def startSimulation(q0, v0, solverId):
     contact_switch_index += 1;
     contact_names  = [con.name for con in invDynForm.rigidContactConstraints];
     contact_sizes  = [con.dim for con in invDynForm.rigidContactConstraints];
-    contact_size_cum = [np.sum(contact_sizes[:ii]) for ii in range(len(contact_sizes))];
+    contact_size_cum = [int(np.sum(contact_sizes[:ii])) for ii in range(len(contact_sizes))];
     contact_points = [con.framePosition().translation for con in invDynForm.rigidContactConstraints];
     
     for i in range(conf.MAX_TEST_DURATION):            
@@ -210,6 +210,9 @@ def startSimulation(q0, v0, solverId):
 
 
 ''' *********************** BEGINNING OF MAIN SCRIPT *********************** '''
+COM_DISTANCE = 0.3
+print "Simple example to demonstrate how to use this simulation/control environment using the quadruped robot HyQ";
+print "If everything is fine, the robot should move its center of mass of %.2f m in the negative x direction\n" % COM_DISTANCE;
     
 np.set_printoptions(precision=2, suppress=True);
 date_time = datetime.now().strftime('%Y%m%d_%H%M%S');
@@ -250,7 +253,7 @@ invDynForm.addTask(posture_task, conf.w_posture);
     
 ''' CREATE COM TASK '''
 com_ref  = robot.com(q0);
-com_ref[0] -= 0.05;
+com_ref[0] -= COM_DISTANCE;
 com_traj = ConstantNdTrajectory("com_traj", com_ref);
 com_task = CoMTask(invDynForm.r, com_traj);
 com_task.kp = conf.kp_com;
