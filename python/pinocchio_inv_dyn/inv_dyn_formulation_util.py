@@ -208,7 +208,7 @@ class InvDynFormulation (object):
         self.Md = zeros((self.na,self.na)); #np.diag([ g*g*i for (i,g) in zip(INERTIA_ROTOR,GEAR_RATIO) ]); # rotor inertia
         
         ''' create low-pass filter for base velocities '''
-        self.baseVelocityFilter = FirstOrderLowPassFilter(dt, self.BASE_VEL_FILTER_CUT_FREQ , np.zeros(6));            
+        self.baseVelocityFilter = FirstOrderLowPassFilter(dt, self.BASE_VEL_FILTER_CUT_FREQ , zeros(6));            
         if(freeFlyer):
             self.S_T         = zeros((self.nv,self.na));
             self.S_T[6:, :]  = np.matlib.eye(self.na);
@@ -219,8 +219,8 @@ class InvDynFormulation (object):
         self.qMin       = self.r.model.lowerPositionLimit;
         self.qMax       = self.r.model.upperPositionLimit;
         self.dqMax      = self.r.model.velocityLimit;
-        self.ddqMax     = np.matlib.zeros((self.na,1)); 
-        self.ddqStop    = np.matlib.zeros((self.na,1));
+        self.ddqMax     = zeros(self.na); 
+        self.ddqStop    = zeros(self.na);
         if(self.freeFlyer):
             self.qMin[:6]   = -1e100;   # set bounds for the floating base
             self.qMax[:6]   = +1e100;
@@ -290,7 +290,7 @@ class InvDynFormulation (object):
         
     def updateSupportPolygon(self):
         ''' Compute contact points and contact normals in world frame '''
-        ncp = np.sum([p.shape[1] for p in self.rigidContactConstraints_p]);
+        ncp = int(np.sum([p.shape[1] for p in self.rigidContactConstraints_p]));
         self.contact_points  = zeros((3,ncp));
         self.contact_normals = zeros((3,ncp));
         mu_s = zeros(ncp);
