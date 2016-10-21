@@ -158,7 +158,7 @@ def computeAccLimits(q, dq, qMin, qMax, dqMax, ddqMax, dt, verbose=True, ddqStop
 #    if(np.sum(viabViol)>0 and verbose):
 #        print "WARNING: some states are not viable:", np.where(viabViol)[0];
         
-    if(ddqStop==None):
+    if(ddqStop is None):
         ddqStop=ddqMax;
         
     n = q.shape[0];
