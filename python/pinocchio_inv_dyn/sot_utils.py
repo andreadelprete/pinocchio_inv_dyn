@@ -300,21 +300,21 @@ def solveLeastSquare(A, b, lb=None, ub=None, A_in=None, lb_in=None, ub_in=None, 
     m_in = 0;
     A = np.asarray(A);
     b = np.asarray(b).squeeze();
-    if(A_in!=None):
+    if(A_in is not None):
         m_in = A_in.shape[0];
-        if(lb_in==None):
+        if(lb_in is None):
             lb_in = np.array(m_in*[-1e99]);
         else:
             lb_in = np.asarray(lb_in).squeeze();
-        if(ub_in==None):
+        if(ub_in is None):
             ub_in = np.array(m_in*[1e99]);
         else:
             ub_in = np.asarray(ub_in).squeeze();
-    if(lb==None):
+    if(lb is None):
         lb = np.array(n*[-1e99]);
     else:
         lb = np.asarray(lb).squeeze();
-    if(ub==None):
+    if(ub is None):
         ub = np.array(n*[1e99]);
     else:
         ub = np.asarray(ub).squeeze();
@@ -322,7 +322,7 @@ def solveLeastSquare(A, b, lb=None, ub=None, A_in=None, lb_in=None, ub_in=None, 
     # 0.5||Ax-b||^2 = 0.5(x'A'Ax - 2b'Ax + b'b) = 0.5x'A'Ax - b'Ax +0.5b'b
     Hess = np.dot(A.T,A) + regularization*np.identity(n);
     grad = -np.dot(A.T,b);
-    if(maxIterations==None):
+    if(maxIterations is None):
         maxActiveSetIter = np.array([100+2*m_in+2*n]);
     else:
         maxActiveSetIter = np.array([maxIterations]);
