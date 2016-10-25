@@ -91,7 +91,7 @@ class RobotWrapper(PinocchioRobotWrapper):
 
             # Start a new "scene" in this window, named "world", with just a floor.
             if "world" not in self.viewer.gui.getSceneList():
-                self.viewer.gui.createScene("world")
+                self.viewer.gui.createSceneWithFloor("world")
             self.viewer.gui.addSceneToWindow("world", self.windowID)
     
         self.viewer.gui.createGroup(nodeName)
