@@ -242,11 +242,15 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
     assert mass>0.0
     assert T_0>0.0
     assert mu>0.0
-    
     c0 = np.asarray(c0).squeeze();
     dc0 = np.asarray(dc0).squeeze();
     contact_points = np.asarray(contact_points);
     contact_normals = np.asarray(contact_normals);
+    assert c0.shape[0]==3
+    assert dc0.shape[0]==3
+    assert contact_points.shape[1]==3
+    assert contact_normals.shape[1]==3
+    assert contact_points.shape[0]==contact_normals.shape[0]
     
     g_vector = np.array([0,0,-9.81]);
     (H,h) = compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=eliminate_redundancies);
@@ -479,7 +483,7 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         - If C01 contains zero
 '''
 def test():
-    DO_PLOTS = False;
+    DO_PLOTS = True;
     PLOT_3D = False;
     mass = 75;             # mass of the robot
     mu = 0.5;           # friction coefficient
@@ -509,7 +513,7 @@ def test():
         Y_UB = np.max(p[:,1]+Y_MARG);
         Z_LB = np.min(p[:,2]-0.05);
         Z_UB = np.max(p[:,2]+1.5);
-        (H,h) = compute_GIWC(p, N, mu, 4, USE_DIAGONAL_GENERATORS);
+        (H,h) = compute_GIWC(p, N, mu, False, USE_DIAGONAL_GENERATORS);
         (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
         
     dc0 = np.random.uniform(-1, 1, size=3); 
@@ -555,8 +559,8 @@ def test():
 if __name__=="__main__":
     for i in range(1):
         try:
-            test();
-#            ret = cProfile.run("test()");
+#            test();
+            ret = cProfile.run("test()");
         except Exception as e:
             print e;
             continue;
