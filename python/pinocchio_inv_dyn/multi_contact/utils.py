@@ -12,20 +12,65 @@ Created on Tue Aug 30 16:34:13 2016
 @author: adelpret
 """
 
-from polytope_conversion_utils import crossMatrix, cone_span_to_face, eliminate_redundant_inequalities
-from geom_utils import is_vector_inside_cone, plot_inequalities
-from transformations import euler_matrix
+from pinocchio_inv_dyn.polytope_conversion_utils import crossMatrix, cone_span_to_face, eliminate_redundant_inequalities
+from pinocchio_inv_dyn.geom_utils import is_vector_inside_cone, plot_inequalities
+from pinocchio_inv_dyn.transformations import euler_matrix
 
-import plot_utils as plut
+import pinocchio_inv_dyn.plot_utils as plut
 import matplotlib.pyplot as plt
 from math import atan, pi
 
 import numpy as np
+from numpy.linalg import norm
 from numpy.random import uniform
 from numpy import sqrt
 import cProfile
 
+np.set_printoptions(precision=2, suppress=True, linewidth=100);
+np.random.seed(2);
 EPS = 1e-5;
+
+def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
+    assert contact_points.shape[1]==3
+    assert contact_normals.shape[1]==3
+    assert contact_points.shape[0]==contact_normals.shape[0]
+    contact_points = np.asarray(contact_points);
+    contact_normals = np.asarray(contact_normals);
+    nContacts = contact_points.shape[0];
+    cg = 4;                         # number of generators for each friction cone
+    nGen = nContacts*cg;            # total number of generators
+    if(isinstance(mu, (list, tuple, np.ndarray))):
+        mu = np.asarray(mu).squeeze();
+    else:
+        mu = mu*np.ones(nContacts);
+    G = np.zeros((3,nGen));
+    A = np.zeros((6,nGen));
+    P = np.zeros((6,3));
+    P[:3,:] = -np.identity(3);
+    muu = mu/sqrt(2.0);
+    for i in range(nContacts):
+        ''' compute tangent directions '''
+        contact_normals[i,:]  = contact_normals[i,:]/norm(contact_normals[i,:]);
+        T1 = np.cross(contact_normals[i,:], [0.,1.,0.]);
+        if(norm(T1)<EPS):
+            T1 = np.cross(contact_normals[i,:], [1.,0.,0.]);
+        T1 = T1/norm(T1);
+        T2 = np.cross(contact_normals[i,:], T1);
+        G[:,cg*i+0] =  muu[i]*T1 + muu[i]*T2 + contact_normals[i,:];
+        G[:,cg*i+1] =  muu[i]*T1 - muu[i]*T2 + contact_normals[i,:];
+        G[:,cg*i+2] = -muu[i]*T1 + muu[i]*T2 + contact_normals[i,:];
+        G[:,cg*i+3] = -muu[i]*T1 - muu[i]*T2 + contact_normals[i,:];
+        ''' compute matrix mapping contact forces to gravito-inertial wrench '''
+        P[3:,:] = -crossMatrix(contact_points[i,:]);
+        ''' project generators in 6d centroidal space '''
+        A[:,cg*i:cg*i+cg] = np.dot(P, G[:,cg*i:cg*i+cg]);
+    
+    ''' normalize generators '''
+    for i in range(nGen):
+        G[:,i] /= norm(G[:,i]);
+        A[:,i] /= norm(A[:,i]);
+    
+    return (A, G);
 
 ''' Find a position of the center of mass that is in static equilibrium.
 '''
@@ -42,7 +87,7 @@ def find_static_equilibrium_com(mass, com_lb, com_ub, H, h, MAX_ITER=1000):
         FOUND_STATIC_COM = np.max(np.dot(H, w) - h) <= 1e-12;
         i += 1;
         if(i>=MAX_ITER):
-            print "ERROR: Could not find com position in static equilibrium in %d iterations."%MAX_ITER;
+#            print "ERROR: Could not find com position in static equilibrium in %d iterations."%MAX_ITER;
             return (False,c0);
     return (True,c0);
 
@@ -238,7 +283,8 @@ def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_r
                 
 '''
 
-def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER=1000, DO_PLOTS=False, verb=0, eliminate_redundancies=False):
+def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER=1000, DO_PLOTS=False, verb=0, 
+               eliminate_redundancies=False):
     assert mass>0.0
     assert T_0>0.0
     assert mu>0.0
@@ -298,19 +344,21 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
             a[i] /= abs(b[i]);
             d[i] /= abs(b[i]);
             b[i] /= abs(b[i]);
-        else:
-            print "WARNING: cannot normalize %d-th inequality because coefficient of DDalpha is almost zero"%i, b[i];
-#            return (False, c0, dc0);
-    
+        elif(verb>0):
+            print "WARNING: cannot normalize %d-th inequality because coefficient of DDalpha is almost zero"%i, b[i];    
     
     ''' Initialize: alpha=0, Dalpha=||dc0|| '''
     alpha = 0;
     Dalpha = np.linalg.norm(dc0);
+
+    #sort b indices to only keep negative values
+    negative_ids = np.where(b<0)[0];
+    if(negative_ids.shape[0]==0):
+        # CoM acceleration is unbounded
+        return (True, c0, 0.0*v);
     
     for iiii in range(MAX_ITER):
         ''' Find current active inequality: b*DDalpha <= d - a*alpha (i.e. DDalpha lower bound for current alpha value) ''' 
-        #sort b indices to only keep negative values
-        negative_ids = np.where(b<0)[0];
         a_alpha_d = a*alpha-d;
         a_alpha_d_negative_bs = a_alpha_d[negative_ids];
         (i_DDalpha_min, DDalpha_min) = [(i,a_min) for (i, a_min) in [(j, a_alpha_d[j]) for j in negative_ids] if (a_min >= a_alpha_d_negative_bs).all()][0]
@@ -328,13 +376,15 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         den = b*a[i_DDalpha_min] + a;
         i_pos = np.where(den>0)[0];
         if(i_pos.shape[0]==0):
-            print "ERROR b*a_i0+a is never positive, that means that alpha_max is unbounded", den;
-            return (False, c0+alpha*v, Dalpha*v);
-        alpha_max = np.min((d[i_pos] + b[i_pos]*d[i_DDalpha_min])/den[i_pos]);
-        if(verb>0):
-            print "alpha_max", alpha_max;
+#            print "WARNING b*a_i0+a is never positive, that means that alpha_max is unbounded";
+            alpha_max = 10.0;
+        else:
+            alpha_max = np.min((d[i_pos] + b[i_pos]*d[i_DDalpha_min])/den[i_pos]);
+            if(verb>0):
+                print "alpha_max", alpha_max;
         if(alpha_max<alpha):
-            print "ERROR: alpha_max<alpha", alpha_max, alpha;
+            # We reach the right limit of the polytope of feasible com pos-acc.
+            # This means there is no feasible com acc for farther com position (with zero angular momentum derivative)
             return (False, c0+alpha*v, Dalpha*v);
             
         ''' If DDalpha is not always negative on the current segment then update alpha_max to the point 
@@ -483,7 +533,7 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         - If C01 contains zero
 '''
 def test():
-    DO_PLOTS = True;
+    DO_PLOTS = False;
     PLOT_3D = False;
     mass = 75;             # mass of the robot
     mu = 0.5;           # friction coefficient
@@ -548,19 +598,23 @@ def test():
             ax.scatter(c0[0]+s*dc0[0],c0[1]+s*dc0[1],c0[2]+s*dc0[2], c='k', marker='x');
         ax.set_xlabel('x'); ax.set_ylabel('y'); ax.set_zlabel('z');
    
-#    cProfile.run("can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);");
-#    return True
-    return can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
-#    (has_stopped, c_final) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
-#    if(DO_PLOTS):
-#        plt.show();
+#    return can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
+    (has_stopped, c_final, dc_final) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
+    print "Initial com position", c0
+    print "Initial com velocity", dc0, "norm %.3f"%norm(dc0)
+    if(has_stopped):
+        print "The system is stable"
+    else:
+        print "The system is unstable"
+    
+    return True;
         
 
 if __name__=="__main__":
     for i in range(1):
         try:
-#            test();
-            ret = cProfile.run("test()");
+            test();
+#            ret = cProfile.run("test()");
         except Exception as e:
             print e;
             continue;
