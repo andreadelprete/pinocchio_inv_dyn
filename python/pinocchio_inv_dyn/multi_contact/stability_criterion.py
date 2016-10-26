@@ -5,12 +5,6 @@ Created on Thu Sep  1 16:54:39 2016
 @author: adelpret
 """
 
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Aug 30 16:34:13 2016
-
-@author: adelpret
-"""
 from com_acc_LP import ComAccLP
 from robust_equilibrium_DLP import RobustEquilibriumDLP
 import pinocchio_inv_dyn.plot_utils as plut
@@ -229,8 +223,6 @@ def test(N_CONTACTS = 2):
     mu = 0.5;           # friction coefficient
     lx = 0.1;           # half foot size in x direction
     ly = 0.07;          # half foot size in y direction
-    USE_DIAGONAL_GENERATORS = True;
-    GENERATE_QUASI_FLAT_CONTACTS = True;
     #First, generate a contact configuration
     CONTACT_POINT_UPPER_BOUNDS = [ 0.5,  0.5,  0.5];
     CONTACT_POINT_LOWER_BOUNDS = [-0.5, -0.5,  0.0];
@@ -239,21 +231,20 @@ def test(N_CONTACTS = 2):
     RPY_UPPER_BOUNDS = [+2*gamma, +2*gamma, +pi];
     MIN_CONTACT_DISTANCE = 0.3;
     g_vector = np.array([0., 0., -9.81]);
-    
     X_MARG = 0.07;
     Y_MARG = 0.07;
     
     succeeded = False;
-    
-    while(succeeded == False):
-        (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS);        
+    while(not succeeded):
+        (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, 
+                                   RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, False);
         X_LB = np.min(p[:,0]-X_MARG);
         X_UB = np.max(p[:,0]+X_MARG);
         Y_LB = np.min(p[:,1]-Y_MARG);
         Y_UB = np.max(p[:,1]+Y_MARG);
         Z_LB = np.min(p[:,2]-0.05);
         Z_UB = np.max(p[:,2]+1.5);
-        (H,h) = compute_GIWC(p, N, mu, False, USE_DIAGONAL_GENERATORS);
+        (H,h) = compute_GIWC(p, N, mu, False);
         (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
         
     dc0 = np.random.uniform(-1, 1, size=3); 
@@ -312,7 +303,6 @@ def test(N_CONTACTS = 2):
         print "\n\n *** Old algorithm failed: ", e
         print "Results of new algorithm is", has_stopped, "c0", c0, "dc0", dc0, "cFinal", c_final, "dcFinal", dc_final,"\n";
         
-        
     return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
         
 
@@ -320,8 +310,8 @@ if __name__=="__main__":
     maxTime = 0.0;
     maxOutIter = 0;
     maxInIter = 0;
-    N_CONTACTS = 4;
-    for i in range(92,93):
+    N_CONTACTS = 2;
+    for i in range(0,500):
         try:
             np.random.seed(i);
             (time, outIter, inIter) = test(N_CONTACTS);
