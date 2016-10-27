@@ -5,13 +5,6 @@ Created on Thu Sep  1 16:54:39 2016
 @author: adelpret
 """
 
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Aug 30 16:34:13 2016
-
-@author: adelpret
-"""
-
 from pinocchio_inv_dyn.polytope_conversion_utils import crossMatrix, cone_span_to_face, eliminate_redundant_inequalities
 from pinocchio_inv_dyn.geom_utils import is_vector_inside_cone, plot_inequalities
 from pinocchio_inv_dyn.transformations import euler_matrix
@@ -26,14 +19,16 @@ from numpy.random import uniform
 from numpy import sqrt
 import cProfile
 
-np.set_printoptions(precision=2, suppress=True, linewidth=100);
-np.random.seed(2);
 EPS = 1e-5;
 
 def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
-    assert contact_points.shape[1]==3
-    assert contact_normals.shape[1]==3
-    assert contact_points.shape[0]==contact_normals.shape[0]
+    ''' Compute two matrices. The first one contains the 6d generators of the
+        centroidal cone. The second one contains the 3d generators of the 
+        contact cones (4 generators for each contact point).
+    '''
+    assert contact_points.shape[1]==3, "Wrong size of contact_points"
+    assert contact_normals.shape[1]==3, "Wrong size of contact_normals"
+    assert contact_points.shape[0]==contact_normals.shape[0], "Size of contact_points and contact_normals do not match"
     contact_points = np.asarray(contact_points);
     contact_normals = np.asarray(contact_normals);
     nContacts = contact_points.shape[0];
@@ -49,7 +44,7 @@ def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
     P[:3,:] = -np.identity(3);
     muu = mu/sqrt(2.0);
     for i in range(nContacts):
-        ''' compute tangent directions '''
+        # compute tangent directions
         contact_normals[i,:]  = contact_normals[i,:]/norm(contact_normals[i,:]);
         T1 = np.cross(contact_normals[i,:], [0.,1.,0.]);
         if(norm(T1)<EPS):
@@ -60,21 +55,21 @@ def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
         G[:,cg*i+1] =  muu[i]*T1 - muu[i]*T2 + contact_normals[i,:];
         G[:,cg*i+2] = -muu[i]*T1 + muu[i]*T2 + contact_normals[i,:];
         G[:,cg*i+3] = -muu[i]*T1 - muu[i]*T2 + contact_normals[i,:];
-        ''' compute matrix mapping contact forces to gravito-inertial wrench '''
+        # compute matrix mapping contact forces to gravito-inertial wrench
         P[3:,:] = -crossMatrix(contact_points[i,:]);
-        ''' project generators in 6d centroidal space '''
+        # project generators in 6d centroidal space
         A[:,cg*i:cg*i+cg] = np.dot(P, G[:,cg*i:cg*i+cg]);
     
-    ''' normalize generators '''
+    # normalize generators
     for i in range(nGen):
         G[:,i] /= norm(G[:,i]);
         A[:,i] /= norm(A[:,i]);
     
     return (A, G);
 
-''' Find a position of the center of mass that is in static equilibrium.
-'''
+
 def find_static_equilibrium_com(mass, com_lb, com_ub, H, h, MAX_ITER=1000):
+    ''' Find a position of the center of mass that is in static equilibrium.'''
     FOUND_STATIC_COM = False;
     g_vector = np.array([0,0,-9.81]);
     w = np.zeros(6);
@@ -92,10 +87,10 @@ def find_static_equilibrium_com(mass, com_lb, com_ub, H, h, MAX_ITER=1000):
     return (True,c0);
 
 
-''' Generate the 4 contact points and the associated normal directions
-    for a rectangular contact.
-'''    
 def generate_rectangle_contacts(lx, ly, pos, rpy):
+    ''' Generate the 4 contact points and the associated normal directions
+        for a rectangular contact.
+    '''    
     # contact points in local frame
     p = np.array([[ lx,  ly, 0],
                [ lx, -ly, 0],
@@ -117,17 +112,19 @@ def generate_rectangle_contacts(lx, ly, pos, rpy):
     return (p,N);
 
 
-''' Generate the contact points and the contact normals associated to randomly generated rectangular contact surfaces
-'''
+
 def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, 
                       RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS=False):
+    ''' Generate the contact points and the contact normals associated to randomly 
+        generated rectangular contact surfaces.
+    '''
     contact_pos = np.zeros((N_CONTACTS, 3));
     contact_rpy = np.zeros((N_CONTACTS, 3));
     p = np.zeros((4*N_CONTACTS,3)); # contact points
     N = np.zeros((4*N_CONTACTS,3)); # contact normals
     g_vector = np.array([0, 0, -9.81]);
     
-    ''' Generate contact positions and orientations '''
+    # Generate contact positions and orientations 
     for i in range(N_CONTACTS):
         while True:
             contact_pos[i,:] = uniform(CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS);      # contact position
@@ -135,7 +132,7 @@ def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTAC
             for j in range(i-1):
                 if(np.linalg.norm(contact_pos[i,:]-contact_pos[j,:])<MIN_CONTACT_DISTANCE):
                     collision = True;
-            if(collision==False):
+            if(not collision):
                 break;
         
         while True:
@@ -146,82 +143,27 @@ def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTAC
     return (p, N);
 
 
-''' Compute the gravito-inertial wrench cone.
-    @param contact_points Nx3 matrix containing the contact points
-    @param contact_normals Nx3 matrix containing the contact normals
-    @param mu A scalar friction coefficient, or an array of friction coefficients (one for each contact point)
-    @param cg Number of generator for the friction cone of each contact point
-    @param USE_DIAGONAL_GENERATORS If True generate the generators turned of 45 degrees
-    @return (H,h) Matrix and vector defining the GIWC as H*w <= h
-'''
+
 def compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=False, USE_DIAGONAL_GENERATORS=True):
-    assert contact_points.shape[1]==3
-    assert contact_normals.shape[1]==3
-    assert contact_points.shape[0]==contact_normals.shape[0]
-    
-    contact_points = np.asarray(contact_points);
-    contact_normals = np.asarray(contact_normals);
-    nContacts = contact_points.shape[0];
-    if(isinstance(mu, (list, tuple, np.ndarray))):
-        mu = np.asarray(mu).squeeze();
-    else:
-        mu = mu*np.ones(nContacts);        
-    
-    ''' compute generators '''
-    #gamma = atan(mu);   # half friction cone angle
-    cg = 4;
-    nGen = nContacts*cg;           # number of generators
-    S = np.zeros((3,nGen));
-    T1 = np.zeros((nContacts,3));
-    T2 = np.zeros((nContacts,3));
-    muu = mu/sqrt(2);
-    for i in range(nContacts):
-        ''' compute tangent directions '''
-        contact_normals[i,:]  = contact_normals[i,:]/np.linalg.norm(contact_normals[i,:]);
-        T1[i,:] = np.cross(contact_normals[i,:], [0.,1.,0.]);
-        if(np.linalg.norm(T1[i,:])<EPS):
-            T1[i,:] = np.cross(contact_normals[i,:], [1.,0.,0.]);
-        T1[i,:] = T1[i,:]/np.linalg.norm(T1[i,:]);
-        T2[i,:] = np.cross(contact_normals[i,:], T1[i,:]);
-        T2[i,:] = T2[i,:]/np.linalg.norm(T2[i,:]);
-        
-        if(USE_DIAGONAL_GENERATORS):
-            S[:,cg*i+0] =  muu[i]*T1[i,:] + muu[i]*T2[i,:] + contact_normals[i,:];
-            S[:,cg*i+1] =  muu[i]*T1[i,:] - muu[i]*T2[i,:] + contact_normals[i,:];
-            S[:,cg*i+2] = -muu[i]*T1[i,:] + muu[i]*T2[i,:] + contact_normals[i,:];
-            S[:,cg*i+3] = -muu[i]*T1[i,:] - muu[i]*T2[i,:] + contact_normals[i,:];
-        else:
-            S[:,cg*i+0] =   mu[i]*T1[i,:] + contact_normals[i,:];
-            S[:,cg*i+1] =  -mu[i]*T1[i,:] + contact_normals[i,:];
-            S[:,cg*i+2] =   mu[i]*T2[i,:] + contact_normals[i,:];
-            S[:,cg*i+3] = - mu[i]*T2[i,:] + contact_normals[i,:];
-        
-        S[:,cg*i+0] = S[:,cg*i+0]/np.linalg.norm(S[:,cg*i+0]);
-        S[:,cg*i+1] = S[:,cg*i+1]/np.linalg.norm(S[:,cg*i+1]);
-        S[:,cg*i+2] = S[:,cg*i+2]/np.linalg.norm(S[:,cg*i+2]);
-        S[:,cg*i+3] = S[:,cg*i+3]/np.linalg.norm(S[:,cg*i+3]);
-    
-    ''' compute matrix mapping contact forces to gravito-inertial wrench '''
-    M = np.zeros((6,3*nContacts));
-    for i in range(nContacts):
-        M[:3, 3*i:3*i+3] = -np.identity(3);
-        M[3:, 3*i:3*i+3] = -crossMatrix(contact_points[i,:]);
-        
-    ''' project generators in 6d centroidal space '''
-    S_centr = np.zeros((6,nGen));
-    for i in range(nContacts):
-        S_centr[:,cg*i:cg*i+cg] = np.dot(M[:,3*i:3*i+3], S[:,cg*i:cg*i+cg]);
-    ''' convert generators to inequalities '''
+    ''' Compute the gravito-inertial wrench cone (i.e. the centroidal cone).
+        @param contact_points Nx3 matrix containing the contact points
+        @param contact_normals Nx3 matrix containing the contact normals
+        @param mu A scalar friction coefficient, or an array of friction coefficients (one for each contact point)
+        @param cg Number of generator for the friction cone of each contact point
+        @param USE_DIAGONAL_GENERATORS If True generate the generators turned of 45 degrees
+        @return (H,h) Matrix and vector defining the GIWC as H*w <= h
+    '''
+    (S_centr, S) = compute_centroidal_cone_generators(contact_points, contact_normals, mu);
+    # convert generators to inequalities
     H = cone_span_to_face(S_centr,eliminate_redundancies);
     h = np.zeros(H.shape[0]);
     return (H,h);
     
     
-''' Compute the 2d support polygon A*c<=b given the gravito-inertial wrench 
-    cone (GIWC) as H*w <= h.
-'''
 def compute_support_polygon(H, h, mass, g_vector, eliminate_redundancies=False):
-    ''' Project inequalities from 6d to 2d x-y com space.
+    ''' Compute the 2d support polygon A*c<=b given the gravito-inertial wrench 
+        cone (GIWC) as H*w <= h.
+        Project inequalities from 6d to 2d x-y com space.
         The com wrench to maintain static equilibrium is an affine function
         of the com position c:
             w = D*c+d
@@ -241,16 +183,16 @@ def compute_support_polygon(H, h, mass, g_vector, eliminate_redundancies=False):
     return (A,b);
     
     
-''' Compute the inequalities A*x<=b defining the polytope of feasible CoM accelerations
-    assuming zero rate of change of angular momentum.
-    @param c0 Current com position
-    @param H Matrix of GIWC, which can be computed by compute_GIWC
-    @param h Vector of GIWC, which can be computed by compute_GIWC
-    @param mass Mass of the system in Kg
-    @param g_vector Gravity vector
-    @return (A,b)
-'''
 def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_redundancies=False):
+    ''' Compute the inequalities A*x<=b defining the polytope of feasible CoM accelerations
+        assuming zero rate of change of angular momentum.
+        @param c0 Current com position
+        @param H Matrix of GIWC, which can be computed by compute_GIWC
+        @param h Vector of GIWC, which can be computed by compute_GIWC
+        @param mass Mass of the system in Kg
+        @param g_vector Gravity vector
+        @return (A,b)
+    '''
     K = np.zeros((6,3));
     K[:3,:] = mass*np.identity(3);
     K[3:,:] = mass*crossMatrix(com_pos);
@@ -261,47 +203,55 @@ def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_r
     return A,b;
     
 
-''' MULTI-CONTACT BALANCE (can I stop?)
-    Input: initial CoM position c0, initial CoM velocity dc0, contact points, contact normals, friction coefficient mu, T_0=1
-    Output: (True, c_final) or (False, None)
-    Steps:
-        - Compute GIWC: H*w <= h, where w=(m*(g-ddc), m*cx(g-ddc))
-        - Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=-DDalpha*v, v=dc0/||dc0||: A*(alpha,DDalpha)<=b
-        - Find ordered (left-most first, clockwise) vertices of 2d polytope A*(alpha,DDalpha)<=b: V
-        - Initialize: alpha=0, Dalpha=||dc0||
-        - LOOP:
-            - Find current active inequality: a*alpha + b*DDalpha <= d (i.e. DDalpha upper bound for current alpha value)
-            - If DDalpha_upper_bound<0: return False
-            - Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
-            - Initialize: t=T_0, t_ub=10, t_lb=0
-            LOOP:
-                - Integrate LDS until t: DDalpha = d/b - (a/d)*alpha
-                - if(Dalpha(t)==0 && alpha(t)<=alpha_max):  return (True, alpha(t)*v)
-                - if(alpha(t)==alpha_max && Dalpha(t)>0):   alpha=alpha(t), Dalpha=Dalpha(t), break
-                - if(alpha(t)<alpha_max && Dalpha>0):       t_lb=t, t=(t_ub+t_lb)/2
-                - else                                      t_ub=t, t=(t_ub+t_lb)/2
-                
-'''
-
 def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER=1000, DO_PLOTS=False, verb=0, 
                eliminate_redundancies=False):
-    assert mass>0.0
-    assert T_0>0.0
-    assert mu>0.0
+    ''' Determine whether the system can come to a stop without changing contacts.
+        Keyword arguments:
+        c0 -- initial CoM position 
+        dc0 -- initial CoM velocity 
+        contact points -- a matrix containing the contact points
+        contact normals -- a matrix containing the contact normals
+        mu -- friction coefficient (either a scalar or an array)
+        mass -- the robot mass
+        T_0 -- an initial guess for the time to stop
+        Output: (is_stable, c_final, dc_final), where:
+        is_stable -- boolean value
+        c_final -- final com position
+        dc_final -- final com velocity
+    '''
+#        Steps:
+#            - Compute GIWC: H*w <= h, where w=(m*(g-ddc), m*cx(g-ddc))
+#            - Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=-DDalpha*v, v=dc0/||dc0||: A*(alpha,DDalpha)<=b
+#            - Find ordered (left-most first, clockwise) vertices of 2d polytope A*(alpha,DDalpha)<=b: V
+#            - Initialize: alpha=0, Dalpha=||dc0||
+#            - LOOP:
+#                - Find current active inequality: a*alpha + b*DDalpha <= d (i.e. DDalpha upper bound for current alpha value)
+#                - If DDalpha_upper_bound<0: return False
+#                - Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
+#                - Initialize: t=T_0, t_ub=10, t_lb=0
+#                LOOP:
+#                    - Integrate LDS until t: DDalpha = d/b - (a/d)*alpha
+#                    - if(Dalpha(t)==0 && alpha(t)<=alpha_max):  return (True, alpha(t)*v)
+#                    - if(alpha(t)==alpha_max && Dalpha(t)>0):   alpha=alpha(t), Dalpha=Dalpha(t), break
+#                    - if(alpha(t)<alpha_max && Dalpha>0):       t_lb=t, t=(t_ub+t_lb)/2
+#                    - else                                      t_ub=t, t=(t_ub+t_lb)/2
+    assert mass>0.0, "Mass is not positive"
+    assert T_0>0.0, "Time is not positive"
+    assert mu>0.0, "Friction coefficient is not positive"
     c0 = np.asarray(c0).squeeze();
     dc0 = np.asarray(dc0).squeeze();
     contact_points = np.asarray(contact_points);
     contact_normals = np.asarray(contact_normals);
-    assert c0.shape[0]==3
-    assert dc0.shape[0]==3
-    assert contact_points.shape[1]==3
-    assert contact_normals.shape[1]==3
-    assert contact_points.shape[0]==contact_normals.shape[0]
+    assert c0.shape[0]==3, "Com position has not size 3"
+    assert dc0.shape[0]==3, "Com velocity has not size 3"
+    assert contact_points.shape[1]==3, "Contact points have not size 3"
+    assert contact_normals.shape[1]==3, "Contact normals have not size 3"
+    assert contact_points.shape[0]==contact_normals.shape[0], "Number of contact points and contact normals do not match"
     
     g_vector = np.array([0,0,-9.81]);
     (H,h) = compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=eliminate_redundancies);
     
-    ''' If initial com velocity is zero then test static equilibrium '''
+    # If initial com velocity is zero then test static equilibrium
     if(np.linalg.norm(dc0) < EPS):
         w = np.zeros(6);
         w[2] = -mass*9.81;
@@ -310,7 +260,7 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
             return (True, c0, dc0);
         return (False, c0, dc0);
 
-    ''' Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=DDalpha*v, v=dc0/||dc0||: a*alpha + b*DDalpha <= d '''
+    # Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=DDalpha*v, v=dc0/||dc0||: a*alpha + b*DDalpha <= d
     v = dc0/np.linalg.norm(dc0);
     K = np.zeros((6,3));
     K[:3,:] = mass*np.identity(3);
@@ -332,13 +282,13 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         ax.set_ylabel('com acc');
         plt.show();
         
-    ''' Eliminate redundant inequalities '''
+    # Eliminate redundant inequalities
     if(eliminate_redundancies):
         A_red, d = eliminate_redundant_inequalities(np.vstack([a,b]).T, d);
         a = A_red[:,0];
         b = A_red[:,1];
 	
-    ''' Normalize inequalities to have unitary coefficients for DDalpha: b*DDalpha <= d - a*alpha '''
+    # Normalize inequalities to have unitary coefficients for DDalpha: b*DDalpha <= d - a*alpha
     for i in range(a.shape[0]):
         if(abs(b[i]) > EPS):
             a[i] /= abs(b[i]);
@@ -347,7 +297,7 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         elif(verb>0):
             print "WARNING: cannot normalize %d-th inequality because coefficient of DDalpha is almost zero"%i, b[i];    
     
-    ''' Initialize: alpha=0, Dalpha=||dc0|| '''
+    # Initialize: alpha=0, Dalpha=||dc0||
     alpha = 0;
     Dalpha = np.linalg.norm(dc0);
 
@@ -358,7 +308,7 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         return (True, c0, 0.0*v);
     
     for iiii in range(MAX_ITER):
-        ''' Find current active inequality: b*DDalpha <= d - a*alpha (i.e. DDalpha lower bound for current alpha value) ''' 
+        # Find current active inequality: b*DDalpha <= d - a*alpha (i.e. DDalpha lower bound for current alpha value) 
         a_alpha_d = a*alpha-d;
         a_alpha_d_negative_bs = a_alpha_d[negative_ids];
         (i_DDalpha_min, DDalpha_min) = [(i,a_min) for (i, a_min) in [(j, a_alpha_d[j]) for j in negative_ids] if (a_min >= a_alpha_d_negative_bs).all()][0]
@@ -366,13 +316,13 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
             print "DDalpha_min", DDalpha_min;
             print "i_DDalpha_min", i_DDalpha_min;
             
-        '''If DDalpha_lower_bound>0: return False '''
+        # If DDalpha_lower_bound>0: return False 
         if(DDalpha_min >= -EPS):
             if(verb>0):
                 print "Algorithm converged because DDalpha is positive";
             return (False, c0+alpha*v, Dalpha*v);
         
-        ''' Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality) '''
+        # Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
         den = b*a[i_DDalpha_min] + a;
         i_pos = np.where(den>0)[0];
         if(i_pos.shape[0]==0):
@@ -387,14 +337,14 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
             # This means there is no feasible com acc for farther com position (with zero angular momentum derivative)
             return (False, c0+alpha*v, Dalpha*v);
             
-        ''' If DDalpha is not always negative on the current segment then update alpha_max to the point 
-            where the current segment intersects the x axis '''
+        # If DDalpha is not always negative on the current segment then update alpha_max to the point 
+        # where the current segment intersects the x axis 
         if( a[i_DDalpha_min]*alpha_max - d[i_DDalpha_min] > 0.0):
             alpha_max = d[i_DDalpha_min] / a[i_DDalpha_min];
             if(verb>0):
                 print "Updated alpha_max", alpha_max;
         
-        ''' Initialize: t=T_0, t_ub=10, t_lb=0 '''
+        # Initialize: t=T_0, t_ub=10, t_lb=0
         t = T_0;
         t_ub = 10;
         t_lb = 0;
@@ -433,7 +383,7 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
             
         bisection_converged = False;
         for jjjj in range(MAX_ITER):
-            ''' Integrate LDS until t: DDalpha = a*alpha - d '''
+            # Integrate LDS until t: DDalpha = a*alpha - d
             if(abs(a[i_DDalpha_min])>EPS):
                 # if a=0 then the acceleration is a linear function of the position and I need to use this formula to integrate
                 sh = np.sinh(omega*t);
@@ -532,6 +482,7 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         - Compute intersection between C0 and C1 (C01), and C1 and C2 (C12)
         - If C01 contains zero
 '''
+
 def test():
     DO_PLOTS = False;
     PLOT_3D = False;
@@ -542,21 +493,27 @@ def test():
     USE_DIAGONAL_GENERATORS = True;
     GENERATE_QUASI_FLAT_CONTACTS = True;
     #First, generate a contact configuration
-    CONTACT_POINT_UPPER_BOUNDS = [ 0.5,  0.5,  0.5];
+    CONTACT_POINT_UPPER_BOUNDS = [ 0.5,  0.5,  0.0];
     CONTACT_POINT_LOWER_BOUNDS = [-0.5, -0.5,  0.0];
     gamma = atan(mu);   # half friction cone angle
-    RPY_LOWER_BOUNDS = [-2*gamma, -2*gamma, -pi];
-    RPY_UPPER_BOUNDS = [+2*gamma, +2*gamma, +pi];
+    RPY_LOWER_BOUNDS = [-0*gamma, -0*gamma, -pi];
+    RPY_UPPER_BOUNDS = [+0*gamma, +0*gamma, +pi];
     MIN_CONTACT_DISTANCE = 0.3;
     N_CONTACTS = 2
-    
+    READ_CONTACTS_FROM_FILE = True;
     X_MARG = 0.07;
     Y_MARG = 0.07;
     
-    succeeded = False;
-    
-    while(succeeded == False):
-        (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS);        
+    if(READ_CONTACTS_FROM_FILE):
+        import pickle
+        f = open("./data.pkl", 'rb');
+        res = pickle.load(f);
+        f.close();
+#        (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS);
+        p = res['contact_points'].T;
+        N = res['contact_normals'].T;
+        print "Contact points\n", p;
+        print "Contact normals\n", 1e3*N
         X_LB = np.min(p[:,0]-X_MARG);
         X_UB = np.max(p[:,0]+X_MARG);
         Y_LB = np.min(p[:,1]-Y_MARG);
@@ -565,6 +522,21 @@ def test():
         Z_UB = np.max(p[:,2]+1.5);
         (H,h) = compute_GIWC(p, N, mu, False, USE_DIAGONAL_GENERATORS);
         (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
+        if(not succeeded):
+            print "Impossible to find a static equilibrium CoM position with the contacts read from file";
+            return
+    else:
+        succeeded = False;
+        while(succeeded == False):
+            (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS);        
+            X_LB = np.min(p[:,0]-X_MARG);
+            X_UB = np.max(p[:,0]+X_MARG);
+            Y_LB = np.min(p[:,1]-Y_MARG);
+            Y_UB = np.max(p[:,1]+Y_MARG);
+            Z_LB = np.min(p[:,2]-0.05);
+            Z_UB = np.max(p[:,2]+1.5);
+            (H,h) = compute_GIWC(p, N, mu, False, USE_DIAGONAL_GENERATORS);
+            (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
         
     dc0 = np.random.uniform(-1, 1, size=3); 
     dc0[2] = 0;
@@ -600,8 +572,12 @@ def test():
    
 #    return can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
     (has_stopped, c_final, dc_final) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
+    print "Contact points\n", p;
+    print "Contact normals\n", N
     print "Initial com position", c0
     print "Initial com velocity", dc0, "norm %.3f"%norm(dc0)
+    print "Final com position", c_final
+    print "Final com velocity", dc_final, "norm %.3f"%norm(dc_final)
     if(has_stopped):
         print "The system is stable"
     else:
@@ -611,6 +587,8 @@ def test():
         
 
 if __name__=="__main__":
+    np.set_printoptions(precision=2, suppress=True, linewidth=100);
+    np.random.seed(0);
     for i in range(1):
         try:
             test();
