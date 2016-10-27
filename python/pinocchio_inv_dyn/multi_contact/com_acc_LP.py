@@ -50,7 +50,6 @@ class ComAccLP (object):
     Hess = [];     # Hessian
     grad = [];     # gradient
     A = None;       # constraint matrix multiplying the contact force generators
-    a = None;       # constraint vector multiplying the CoM acceleration parameter ddAlpha
     b = None;       # constraint vector multiplying the CoM position parameter alpha
     d = None;       # constraint vector
     
@@ -99,6 +98,8 @@ class ComAccLP (object):
 #        self.qpOasesSolver.printOptions()
         self.b = np.zeros(6);
         self.d = np.empty(6);
+        self.c0 = np.empty(3);
+        self.v = np.empty(3);
         self.constrUB = np.zeros(self.m_in)+1e100;
         self.constrLB = np.zeros(self.m_in)-1e100;
         self.set_problem_data(c0, v, contact_points, contact_normals, mu, g, mass, regularization);
@@ -107,14 +108,14 @@ class ComAccLP (object):
     def set_com_state(self, c0, v):
         assert np.asarray(c0).squeeze().shape[0]==3, "Com position vector has not size 3"
         assert np.asarray(v).squeeze().shape[0]==3, "Com acceleration direction vector has not size 3"
-        c0 = np.asarray(c0).squeeze();
-        v = np.asarray(v).squeeze().copy();
+        self.c0 = np.asarray(c0).squeeze();
+        self.v = np.asarray(v).squeeze().copy();
         if(norm(v)==0.0):
             raise ValueError("[%s] Norm of com acceleration direction v is zero!"%self.name);
-        v /= norm(v);
+        self.v /= norm(self.v);
 
-        self.constrMat[:3,-1] = self.mass*v;
-        self.constrMat[3:,-1] = self.mass*np.cross(c0, v);
+        self.constrMat[:3,-1] = self.mass*self.v;
+        self.constrMat[3:,-1] = self.mass*np.cross(self.c0, self.v);
         self.b[3:] = self.mass*np.cross(v, self.g);
         self.d[:3] = self.mass*self.g;
         self.d[3:] = self.mass*np.cross(c0, self.g);
@@ -133,11 +134,14 @@ class ComAccLP (object):
         self.grad[-1] = 1.0;
         self.constrMat = np.zeros((self.m_in,self.n));
         self.constrMat[:,:-1] = self.A;
+        self.constrMat[:3,-1] = self.mass*self.v;
+        self.constrMat[3:,-1] = self.mass*np.cross(self.c0, self.v);
         self.lb = np.zeros(self.n);
         self.lb[-1] = -1e100;
         self.ub = np.array(self.n*[1e100,]);
         self.x  = np.zeros(self.n);
         self.y  = np.zeros(self.n+self.m_in);
+        self.initialized    = False;
 
 
     def set_problem_data(self, c0, v, contact_points, contact_normals, mu, g, mass, regularization=1e-5):
