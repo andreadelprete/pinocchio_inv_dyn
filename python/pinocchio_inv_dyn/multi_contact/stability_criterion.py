@@ -29,7 +29,10 @@ class StabilityCriterion(object):
     _equilibrium_solver = None;
     _c0 = None;
     _dc0 = None;
+    
     _computationTime = 0.0;
+    _outerIterations = 0;
+    _innerIterations = 0;
     
     def __init__ (self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, maxIter=1000, verb=0, regularization=1e-5):
         ''' Constructor
@@ -38,68 +41,75 @@ class StabilityCriterion(object):
             @param g Gravity vector
             @param regularization Weight of the force minimization, the higher this value, the sparser the solution
         '''
-        assert mass>0.0
-        assert mu>0.0
+        assert mass>0.0, "Mass is not positive"
+        assert mu>0.0, "Friction coefficient is not positive"
         c0 = np.asarray(c0).squeeze();
         dc0 = np.asarray(dc0).squeeze();
         contact_points = np.asarray(contact_points);
         contact_normals = np.asarray(contact_normals);
-        assert c0.shape[0]==3
-        assert dc0.shape[0]==3
-        assert contact_points.shape[1]==3
-        assert contact_normals.shape[1]==3
-        assert contact_points.shape[0]==contact_normals.shape[0]
+        assert c0.shape[0]==3, "Com position vector has not size 3"
+        assert dc0.shape[0]==3, "Com velocity vector has not size 3"
+        assert contact_points.shape[1]==3, "Contact points have not size 3"
+        assert contact_normals.shape[1]==3, "Contact normals have not size 3"
+        assert contact_points.shape[0]==contact_normals.shape[0], "Number of contact points do not match number of contact normals"
         self._name       = name;
         self._maxIter    = maxIter;
         self._verb       = verb;
-        self._c0          = c0;
-        self._dc0         = dc0;
-        if(norm(dc0)!=0.0):
-            self.v = dc0/norm(dc0);
+        self._c0          = c0.copy();
+        self._dc0         = dc0.copy();
+        if(norm(self._dc0)!=0.0):
+            self.v = self._dc0/norm(self._dc0);
         else:
             self.v = np.array([1.0, 0.0, 0.0]);
         self._com_acc_solver  = ComAccLP(name, c0, self.v, contact_points, contact_normals, mu, g, mass, maxIter, verb, regularization);
         self._equilibrium_solver = RobustEquilibriumDLP(name, contact_points, contact_normals, mu, g, mass, verb=verb);
         
+    def set_contacts(self, contact_points, contact_normals, mu):
+        self._com_acc_solver.set_contacts(contact_points, contact_normals, mu);
 
     def can_I_stop(self, c0=None, dc0=None, T_0=0.5, MAX_ITER=1000):
-        ''' Input: initial CoM position c0, initial CoM velocity dc0
-            Output: (True, c_final, dc_final) or (False, c_final, dc_final)
-            Steps:
-                - Compute GIWC: H*w <= h, where w=(m*(g-ddc), m*cx(g-ddc))
-                - Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=-DDalpha*v, v=dc0/||dc0||: A*(alpha,DDalpha)<=b
-                - Find ordered (left-most first, clockwise) vertices of 2d polytope A*(alpha,DDalpha)<=b: V
-                - Initialize: alpha=0, Dalpha=||dc0||
-                - LOOP:
-                    - Find current active inequality: a*alpha + b*DDalpha <= d (i.e. DDalpha upper bound for current alpha value)
-                    - If DDalpha_upper_bound<0: return False
-                    - Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
-                    - Initialize: t=T_0, t_ub=10, t_lb=0
-                    LOOP:
-                        - Integrate LDS until t: DDalpha = d/b - (a/d)*alpha
-                        - if(Dalpha(t)==0 && alpha(t)<=alpha_max):  return (True, alpha(t)*v)
-                        - if(alpha(t)==alpha_max && Dalpha(t)>0):   alpha=alpha(t), Dalpha=Dalpha(t), break
-                        - if(alpha(t)<alpha_max && Dalpha>0):       t_lb=t, t=(t_ub+t_lb)/2
-                        - else                                      t_ub=t, t=(t_ub+t_lb)/2
-                        
+        ''' Determine whether the system can come to a stop without changing contacts.
+            Keyword arguments:
+            c0 -- initial CoM position 
+            dc0 -- initial CoM velocity 
+            contact points -- a matrix containing the contact points
+            contact normals -- a matrix containing the contact normals
+            mu -- friction coefficient (either a scalar or an array)
+            mass -- the robot mass
+            T_0 -- an initial guess for the time to stop
+            Output: (is_stable, c_final, dc_final), where:
+            is_stable -- boolean value
+            c_final -- final com position
+            dc_final -- final com velocity
         '''
-        assert T_0>0.0
+        #- Initialize: alpha=0, Dalpha=||dc0||
+        #- LOOP:
+        #    - Find min com acc for current com pos (i.e. DDalpha_min)
+        #    - If DDalpha_min>0: return False
+        #    - Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
+        #    - Initialize: t=T_0, t_ub=10, t_lb=0
+        #    LOOP:
+        #        - Integrate LDS until t: DDalpha = d/b - (a/d)*alpha
+        #        - if(Dalpha(t)==0 && alpha(t)<=alpha_max):  return (True, alpha(t)*v)
+        #        - if(alpha(t)==alpha_max && Dalpha(t)>0):   alpha=alpha(t), Dalpha=Dalpha(t), break
+        #        - if(alpha(t)<alpha_max && Dalpha>0):       t_lb=t, t=(t_ub+t_lb)/2
+        #        - else                                      t_ub=t, t=(t_ub+t_lb)/2
+        assert T_0>0.0, "Time is not positive"
         if(c0 is not None):
-            c0 = np.asarray(c0).squeeze();
-            assert c0.shape[0]==3;
-            self._c0 = c0;
+            assert np.asarray(c0).squeeze().shape[0]==3, "CoM has not size 3"
+            self._c0 = np.asarray(c0).squeeze().copy();
         if(dc0 is not None):
-            dc0 = np.asarray(dc0).squeeze();
-            assert dc0.shape[0]==3
-            self._dc0 = dc0;
-            if(norm(dc0)!=0.0):
-                self.v = dc0/norm(dc0);
+            assert np.asarray(dc0).squeeze().shape[0]==3, "CoM velocity has not size 3"
+            self._dc0 = np.asarray(dc0).squeeze().copy();
+            if(norm(self._dc0)!=0.0):
+                self.v = self._dc0/norm(self._dc0);
         if((c0 is not None) or (dc0 is not None)):
-            self._com_acc_solver.updateComState(self._c0, self._dc0);
+            self._com_acc_solver.set_com_state(self._c0, self._dc0);
         
-        ''' Initialize: alpha=0, Dalpha=||dc0|| '''
+        # Initialize: alpha=0, Dalpha=||dc0||
         alpha = 0.0;
         Dalpha = norm(self._dc0);
+        last_iteration = False;
         self._computationTime = 0.0;
         self._outerIterations = 0;
         self._innerIterations = 0;
@@ -108,7 +118,12 @@ class StabilityCriterion(object):
             r = self._equilibrium_solver.compute_equilibrium_robustness(self._c0);
             return (r>=0.0, self._c0, self._dc0);
 
-        for iiii in range(MAX_ITER):                
+        for iiii in range(MAX_ITER):
+            if(last_iteration):
+                if(self._verb>0):
+                    print "[%s] Algorithm converged to Dalpha=%.3f" % (self._name, Dalpha);
+                return (False, self._c0+alpha*self.v, Dalpha*self.v);
+
             (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha, MAX_ITER);
             
             self._computationTime += self._com_acc_solver.qpTime;
@@ -117,7 +132,9 @@ class StabilityCriterion(object):
             if(imode!=0):
                 # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
                 return (False, self._c0+alpha*self.v, Dalpha*self.v);
-#                raise ValueError("Impossible to solve LP, "+qpOasesSolverMsg(imode));
+
+            if(self._verb>0):
+                print "[%s] DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, DDalpha_min, alpha, Dalpha, alpha_max, a);
 
             if(DDalpha_min>-EPS):
                 # if minimum com acceleration is positive, it means I cannot stop
@@ -127,14 +144,15 @@ class StabilityCriterion(object):
             # compute DDalpha_0, that is the acceleration corresponding to alpha=0
             DDalpha_0 = DDalpha_min - a*alpha;
             
-            ''' If DDalpha_min is not always negative on the current segment then update 
-                alpha_max to the point where DDalpha_min becomes zero '''
+            # If DDalpha_min is not always negative on the current segment then update 
+            # alpha_max to the point where DDalpha_min becomes zero
             if( DDalpha_0 + a*alpha_max > 0.0):
                 alpha_max = -DDalpha_0 / a;
+                last_iteration = True;
                 if(self._verb>0):
                     print "[%s] Updated alpha_max %.3f"%(self._name, alpha_max);
             
-            ''' Initialize: t=T_0, t_ub=10, t_lb=0 '''
+            # Initialize: t=T_0, t_ub=10, t_lb=0
             t    = T_0;
             t_ub = 10.0;    # hypothesis: 10 seconds are always sufficient to stop
             t_lb = 0.0;
@@ -168,7 +186,7 @@ class StabilityCriterion(object):
                 
             bisection_converged = False;
             for jjjj in range(MAX_ITER):
-                ''' Integrate LDS until t: DDalpha = a*alpha - d '''
+                # Integrate LDS until t: DDalpha = a*alpha - d
                 if(abs(a)>EPS):
                     # if a!=0 then the acceleration is a linear function of the position and I need to use this formula to integrate
                     omega = sqrt(a+0j);
@@ -188,8 +206,8 @@ class StabilityCriterion(object):
                     
                 alpha_t = np.real(alpha_t);
                 Dalpha_t = np.real(Dalpha_t);
-                if(self._verb>0):
-                    print "Bisection iter",jjjj,"alpha",alpha_t,"Dalpha",Dalpha_t,"t", t
+                if(self._verb>1):
+                    print "[%s] Bisection iter"%(self._name),jjjj,"alpha",alpha_t,"Dalpha",Dalpha_t,"t", t
                 
                 if(abs(Dalpha_t)<EPS and alpha_t <= alpha_max+EPS):
                     if(self._verb>0):
@@ -295,10 +313,10 @@ def test(N_CONTACTS = 2):
         if((has_stopped != has_stopped2) or 
             not np.allclose(c_final, c_final2, atol=1e-3) or 
             not np.allclose(dc_final, dc_final2, atol=1e-3)):
-            print "ERROR: the two algorithms gave different results!"
+            print "\nERROR: the two algorithms gave different results!"
             print "New algorithm:", has_stopped, c_final, dc_final;
             print "Old algorithm:", has_stopped2, c_final2, dc_final2;
-            print "Errors:", norm(c_final-c_final2), norm(dc_final-dc_final2);
+            print "Errors:", norm(c_final-c_final2), norm(dc_final-dc_final2), "\n";
     except Exception as e:
         print "\n\n *** Old algorithm failed: ", e
         print "Results of new algorithm is", has_stopped, "c0", c0, "dc0", dc0, "cFinal", c_final, "dcFinal", dc_final,"\n";
@@ -325,6 +343,6 @@ if __name__=="__main__":
 #            ret = cProfile.run("test()");
         except Exception as e:
             print e;
-    print "Max computation time %.3f" % (1e3*maxTime);
+    print "\nMax computation time %.3f" % (1e3*maxTime);
     print "Max outer iterations %d" % (maxOutIter);
     print "Max inner iterations %d" % (maxInIter);

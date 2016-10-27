@@ -85,6 +85,7 @@ class ComAccLP (object):
         self.m_in       = 6;
         self.initialized    = False;
         self.options        = Options();
+        self.options.setToReliable();
         if(self.verb<=1):
             self.options.printLevel  = PrintLevel.NONE;
         elif(self.verb==2):
@@ -94,19 +95,20 @@ class ComAccLP (object):
         elif(self.verb>3):
             self.options.printLevel  = PrintLevel.DEBUG_ITER;
         self.options.enableRegularisation = False;
+        self.options.enableEqualities = True;
 #        self.qpOasesSolver.printOptions()
         self.b = np.zeros(6);
         self.d = np.empty(6);
         self.constrUB = np.zeros(self.m_in)+1e100;
         self.constrLB = np.zeros(self.m_in)-1e100;
-        self.updateProblemData(c0, v, contact_points, contact_normals, mu, g, mass, regularization);
+        self.set_problem_data(c0, v, contact_points, contact_normals, mu, g, mass, regularization);
 
 
-    def updateComState(self, c0, v):
-        assert c0.shape[0]==3
-        assert v.shape[0]==3
-        c0 = np.asarray(c0);
-        v = np.asarray(v);
+    def set_com_state(self, c0, v):
+        assert np.asarray(c0).squeeze().shape[0]==3, "Com position vector has not size 3"
+        assert np.asarray(v).squeeze().shape[0]==3, "Com acceleration direction vector has not size 3"
+        c0 = np.asarray(c0).squeeze();
+        v = np.asarray(v).squeeze().copy();
         if(norm(v)==0.0):
             raise ValueError("[%s] Norm of com acceleration direction v is zero!"%self.name);
         v /= norm(v);
@@ -118,20 +120,15 @@ class ComAccLP (object):
         self.d[3:] = self.mass*np.cross(c0, self.g);
 
 
-    def updateProblemData(self, c0, v, contact_points, contact_normals, mu, g, mass, regularization=1e-5):
-        assert g.shape[0]==3
-        assert mass>0.0
-        self.mass = mass;
-        self.g = np.asarray(g);
-
-        ''' compute matrix A, which maps the force generator coefficients into the centroidal wrench '''
+    def set_contacts(self, contact_points, contact_normals, mu, regularization=1e-5):
+        # compute matrix A, which maps the force generator coefficients into the centroidal wrench
         (self.A, self.G4) = compute_centroidal_cone_generators(contact_points, contact_normals, mu);
-
+        
+        # since the size of the problem may have changed we need to recreate the solver and all the problem matrices/vectors
         self.n              = contact_points.shape[0]*4 + 1;
         self.qpOasesSolver  = SQProblem(self.n,self.m_in); #, HessianType.SEMIDEF);
         self.qpOasesSolver.setOptions(self.options);
-
-        self.Hess = 1e-10*np.identity(self.n);
+        self.Hess = 1e-8*np.identity(self.n);
         self.grad = np.ones(self.n)*regularization;
         self.grad[-1] = 1.0;
         self.constrMat = np.zeros((self.m_in,self.n));
@@ -141,7 +138,15 @@ class ComAccLP (object):
         self.ub = np.array(self.n*[1e100,]);
         self.x  = np.zeros(self.n);
         self.y  = np.zeros(self.n+self.m_in);
-        self.updateComState(c0, v);
+
+
+    def set_problem_data(self, c0, v, contact_points, contact_normals, mu, g, mass, regularization=1e-5):
+        assert g.shape[0]==3, "Gravity vector has not size 3"
+        assert mass>0.0, "Mass is not positive"
+        self.mass = mass;
+        self.g = np.asarray(g).squeeze();
+        self.set_contacts(contact_points, contact_normals, mu, regularization);
+        self.set_com_state(c0, v);
         
 
     def compute_max_deceleration_derivative(self):
@@ -223,7 +228,7 @@ class ComAccLP (object):
         if(not self.initialized):
             self.imode = self.qpOasesSolver.init(self.Hess, self.grad, self.constrMat, self.lb, self.ub, self.constrLB, 
                                                  self.constrUB, maxActiveSetIter, maxComputationTime);
-            if(self.imode!=PyReturnValue.INIT_FAILED_INFEASIBILITY):
+            if(self.imode==0):
                 self.initialized = True;
         else:
             self.imode = self.qpOasesSolver.hotstart(self.grad, self.lb, self.ub, self.constrLB, 
@@ -242,16 +247,21 @@ class ComAccLP (object):
             self.qpOasesSolver.getDualSolution(self.y);
 
             if((self.x<self.lb-self.INEQ_VIOLATION_THR).any()):
+                self.initialized = False;
                 raise ValueError("[%s] ERROR lower bound violated" % (self.name)+str(self.x)+str(self.lb));
             if((self.x>self.ub+self.INEQ_VIOLATION_THR).any()):
+                self.initialized = False;
                 raise ValueError("[%s] ERROR upper bound violated" % (self.name)+str(self.x)+str(self.ub));
             if((np.dot(self.constrMat,self.x)>self.constrUB+self.INEQ_VIOLATION_THR).any()):
-                raise ValueError("[%s] ERROR constraint upper bound violated" % (self.name)+str(np.dot(self.constrMat,self.x))+str(self.constrUB));
+                self.initialized = False;
+                raise ValueError("[%s] ERROR constraint upper bound violated " % (self.name)+str(np.min(np.dot(self.constrMat,self.x)-self.constrUB)));
             if((np.dot(self.constrMat,self.x)<self.constrLB-self.INEQ_VIOLATION_THR).any()):
-                raise ValueError("[%s] ERROR constraint lower bound violated" % (self.name)+str(np.dot(self.constrMat,self.x))+str(self.constrLB));
+                self.initialized = False;
+                raise ValueError("[%s] ERROR constraint lower bound violated " % (self.name)+str(np.max(np.dot(self.constrMat,self.x)-self.constrLB)));
         
             (dx, alpha_min, alpha_max) = self.compute_max_deceleration_derivative();
         else:
+            self.initialized = False;
             dx=0.0;
             alpha_min=0.0;
             alpha_max=0.0;
