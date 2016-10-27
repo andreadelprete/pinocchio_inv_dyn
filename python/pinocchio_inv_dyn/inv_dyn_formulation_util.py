@@ -10,7 +10,7 @@ from sot_utils import compute6dContactInequalities, crossMatrix
 from first_order_low_pass_filter import FirstOrderLowPassFilter
 from convex_hull_util import compute_convex_hull, plot_convex_hull
 from geom_utils import plot_polytope
-from multi_contact_stability_criterion_utils import compute_GIWC, compute_support_polygon
+from multi_contact.utils import compute_GIWC, compute_support_polygon
 
 EPS = 1e-4;
     
