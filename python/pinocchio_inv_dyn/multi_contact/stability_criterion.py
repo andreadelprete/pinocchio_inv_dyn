@@ -64,8 +64,10 @@ class StabilityCriterion(object):
         self._com_acc_solver  = ComAccLP(name, c0, self.v, contact_points, contact_normals, mu, g, mass, maxIter, verb, regularization);
         self._equilibrium_solver = RobustEquilibriumDLP(name, contact_points, contact_normals, mu, g, mass, verb=verb);
         
+
     def set_contacts(self, contact_points, contact_normals, mu):
         self._com_acc_solver.set_contacts(contact_points, contact_normals, mu);
+
 
     def can_I_stop(self, c0=None, dc0=None, T_0=0.5, MAX_ITER=1000):
         ''' Determine whether the system can come to a stop without changing contacts.
@@ -220,6 +222,161 @@ class StabilityCriterion(object):
                     bisection_converged = True;
                     self._innerIterations += jjjj;
                     break;
+                if(alpha_t<alpha_max and Dalpha_t>0):       
+                    t_lb=t;
+                    t=0.5*(t_ub+t_lb);
+                else:                                      
+                    t_ub=t; 
+                    t=0.5*(t_ub+t_lb);
+            
+            if(not bisection_converged):
+                raise ValueError("[%s] Bisection search did not converge in %d iterations"%(self._name, MAX_ITER));
+    
+        raise ValueError("[%s] Algorithm did not converge in %d iterations"%(self._name, MAX_ITER));
+
+
+    def predict_future_state(self, t_pred, c0=None, dc0=None, MAX_ITER=1000):
+        ''' Compute what the CoM state will be at the specified time instant if the system
+            applies maximum CoM deceleration parallel to the current CoM velocity
+            Keyword arguments:
+            t_pred -- Future time at which the prediction is made
+            c0 -- initial CoM position 
+            dc0 -- initial CoM velocity 
+            Output: (t, c_final, dc_final), where:
+            t -- time at which the integration has stopped (equal to t_pred, unless something went wrong)
+            c_final -- final com position
+            dc_final -- final com velocity
+        '''
+        #- Initialize: alpha=0, Dalpha=||dc0||
+        #- LOOP:
+        #    - Find min com acc for current com pos (i.e. DDalpha_min)
+        #    - If DDalpha_min>0: return False
+        #    - Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
+        #    - Initialize: t=T_0, t_ub=10, t_lb=0
+        #    LOOP:
+        #        - Integrate LDS until t: DDalpha = d/b - (a/d)*alpha
+        #        - if(Dalpha(t)==0 && alpha(t)<=alpha_max):  return (True, alpha(t)*v)
+        #        - if(alpha(t)==alpha_max && Dalpha(t)>0):   alpha=alpha(t), Dalpha=Dalpha(t), break
+        #        - if(alpha(t)<alpha_max && Dalpha>0):       t_lb=t, t=(t_ub+t_lb)/2
+        #        - else                                      t_ub=t, t=(t_ub+t_lb)/2
+        assert t_pred>0.0, "Prediction time is not positive"
+        if(c0 is not None):
+            assert np.asarray(c0).squeeze().shape[0]==3, "CoM position has not size 3"
+            self._c0 = np.asarray(c0).squeeze().copy();
+        if(dc0 is not None):
+            assert np.asarray(dc0).squeeze().shape[0]==3, "CoM velocity has not size 3"
+            self._dc0 = np.asarray(dc0).squeeze().copy();
+            if(norm(self._dc0)!=0.0):
+                self.v = self._dc0/norm(self._dc0);
+        if((c0 is not None) or (dc0 is not None)):
+            self._com_acc_solver.set_com_state(self._c0, self._dc0);
+        
+        # Initialize: alpha=0, Dalpha=||dc0||
+        alpha = 0.0;
+        Dalpha = norm(self._dc0);
+        self._computationTime = 0.0;
+        self._outerIterations = 0;
+        self._innerIterations = 0;
+        t_int = 0.0;    # current time
+        
+        if(Dalpha==0.0):
+            r = self._equilibrium_solver.compute_equilibrium_robustness(self._c0);
+            if(r>=0.0):
+                return (t_pred, self._c0, self._dc0);
+            raise ValueError("[%s] NOT IMPLEMENTED YET: initial velocity is zero but system is not in static equilibrium!"%(self._name));
+
+        for iiii in range(MAX_ITER):
+            (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha, MAX_ITER);
+            
+            self._computationTime += self._com_acc_solver.qpTime;
+            self._outerIterations += 1;
+            
+            if(imode!=0):
+                # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
+                return (t_int, self._c0+alpha*self.v, Dalpha*self.v);
+
+            if(self._verb>0):
+                print "[%s] t=%.3f, DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, t_int, DDalpha_min, alpha, Dalpha, alpha_max, a);
+
+            # DDalpha_min is the acceleration corresponding to the current value of alpha
+            # compute DDalpha_0, that is the acceleration corresponding to alpha=0
+            DDalpha_0 = DDalpha_min - a*alpha;
+                        
+            # Initialize initial guess and bounds on integration time
+            t_ub = t_pred-t_int;
+            t_lb = 0.0;
+            t    = t_ub;
+            if(abs(a)<EPS):
+                # if the acceleration is constant over time I can compute directly the time needed
+                # to bring the velocity to zero:
+                #     Dalpha(t) = Dalpha(0) + t*DDalpha = 0
+                #     t = -Dalpha(0)/DDalpha
+                t = - Dalpha / DDalpha_min;
+                alpha_t  = alpha + t*Dalpha + 0.5*t*t*DDalpha_min;
+                if(alpha_t <= alpha_max+EPS):
+                    if(self._verb>0):
+                        print "DDalpha_min is independent from alpha, algorithm converged to Dalpha=0";
+                    # hypothesis: after I reach Dalpha=0 I can maintain it (i.e. DDalpha=0 is feasible)
+                    return (t_pred, self._c0+alpha_t*self.v, 0.0*self.v);
+
+                # if alpha reaches alpha_max before the velocity is zero, then compute the time needed to reach alpha_max
+                #     alpha(t) = alpha(0) + t*Dalpha(0) + 0.5*t*t*DDalpha = alpha_max
+                #     t = (- Dalpha(0) +/- sqrt(Dalpha(0)^2 - 2*DDalpha(alpha(0)-alpha_max))) / DDalpha;
+                # where DDalpha = -d[i_DDalpha_min]
+                # Having two solutions, we take the smallest one because we want to find the first time
+                # at which alpha reaches alpha_max
+                delta = sqrt(Dalpha**2 - 2*DDalpha_min*(alpha-alpha_max))
+                t = ( - Dalpha + delta) / DDalpha_min;
+                if(t<0.0):
+                    raise ValueError("[%s] ERROR: Time to reach alpha_max with constant acceleration is negative: t=%.3f, alpha=%.3f, Dalpha=%.3f, DDalpha_min=%.3f, alpha_max=%.3f"%(self._name,t,alpha,Dalpha,DDalpha_min,alpha_max));
+                # ensure we do not overpass the specified t_pred
+                t = min([t, t_ub]);
+                
+            # integrate until either of these conditions is true:
+            # - you reach t=t_pred (while not passing over alpha_max and maintaining Dalpha>=0)
+            # - you reach alpha_max (while not passing over t_pred and maintaining Dalpha>=0)
+            # - you reach Dalpha=0 (while not passing over alpha_max and t_pred)
+            bisection_converged = False;
+            for jjjj in range(MAX_ITER):
+                # Integrate LDS until t: DDalpha = a*alpha - d
+                if(abs(a)>EPS):
+                    # if a!=0 then the acceleration is a linear function of the position and I need to use this formula to integrate
+                    omega = sqrt(a+0j);
+                    sh = np.sinh(omega*t);
+                    ch = np.cosh(omega*t);
+                    alpha_t  = ch*alpha + sh*Dalpha/omega - (1.0-ch)*(DDalpha_0/a);
+                    Dalpha_t = omega*sh*alpha + ch*Dalpha + omega*sh*(DDalpha_0/a);
+                else:
+                    # if a==0 then the acceleration is constant and I need to use this formula to integrate
+                    alpha_t  = alpha + t*Dalpha + 0.5*t*t*DDalpha_0;
+                    Dalpha_t = Dalpha + t*DDalpha_0;
+                
+                if(np.imag(alpha_t) != 0.0):
+                    raise ValueError("ERROR alpha is imaginary: "+str(alpha_t));
+                if(np.imag(Dalpha_t) != 0.0):
+                    raise ValueError("ERROR Dalpha is imaginary: "+str(Dalpha_t))
+                    
+                alpha_t = np.real(alpha_t);
+                Dalpha_t = np.real(Dalpha_t);
+                if(self._verb>1):
+                    print "[%s] Bisection iter"%(self._name),jjjj,"alpha",alpha_t,"Dalpha",Dalpha_t,"t", t
+                
+                if(alpha_t <= alpha_max+EPS and (abs(Dalpha_t)<EPS or (Dalpha_t>-EPS and abs(t+t_int-t_pred)<EPS))):
+                    # if I did not pass over alpha_max and velocity is zero OR
+                    # if I did not pass over alpha_max and velocity is positive and I reached t_pred
+                    if(self._verb>0):
+                        print "[%s] Algorithm converged to Dalpha=%.3f"%(self._name, Dalpha_t);
+                    self._innerIterations += jjjj;
+                    return (t_pred, self._c0+alpha_t*self.v, Dalpha_t*self.v);
+
+                if(abs(alpha_t-alpha_max)<EPS and Dalpha_t>0):
+                    alpha = alpha_max+EPS;
+                    Dalpha = Dalpha_t;
+                    t_int += t;
+                    bisection_converged = True;
+                    self._innerIterations += jjjj;
+                    break;
+                    
                 if(alpha_t<alpha_max and Dalpha_t>0):       
                     t_lb=t;
                     t=0.5*(t_ub+t_lb);
