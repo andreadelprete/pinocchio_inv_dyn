@@ -268,13 +268,13 @@ class Simulator (object):
     ''' ********** SET ROBOT STATE ********** '''
     
     def setPositions(self, q, updateConstraintReference=True):
-        for i in range(self.nq):
-            if( q[i]>self.qMax[i]+1e-4 ):
-                print "SIMULATOR Joint %d > upper limit, q-qMax=%f deg" % (i,60*(self.q[i]-self.qMax[i]));
-                q[i] = self.qMax[i]-1e-4;
-            elif( q[i]<self.qMin[i]-1e-4 ):
-                print "SIMULATOR Joint %d < lower limit, qMin-q=%f deg" % (i,60*(self.qMin[i]-self.q[i]));
-                q[i] = self.qMin[i]+1e-4;
+#        for i in range(self.nq):
+#            if( q[i]>self.qMax[i]+1e-4 ):
+#                print "SIMULATOR Joint %d > upper limit, q-qMax=%f deg" % (i,60*(self.q[i]-self.qMax[i]));
+#                q[i] = self.qMax[i]-1e-4;
+#            elif( q[i]<self.qMin[i]-1e-4 ):
+#                print "SIMULATOR Joint %d < lower limit, qMin-q=%f deg" % (i,60*(self.qMin[i]-self.q[i]));
+#                q[i] = self.qMin[i]+1e-4;
         self.q = np.matrix.copy(q);
         self.viewer.updateRobotConfig(q);
         
@@ -723,10 +723,11 @@ class Simulator (object):
         return res;
         
     def updateComPositionInViewer(self, com):
-        assert com.shape[0]==3, "com should be a 3x1 matrix"
+        assert np.asarray(com).squeeze().shape[0]==3, "com should be a 3x1 matrix"
+        com = np.asarray(com).squeeze();
         if(self.time_step%int(self.VIEWER_DT/self.dt)==0):
             if(self.DISPLAY_COM):
-                self.viewer.updateObjectConfig('com', (com[0,0], com[1,0], com[2,0], 0.,0.,0.,1.));
+                self.viewer.updateObjectConfig('com', (com[0], com[1], com[2], 0.,0.,0.,1.));
     
     def updateCapturePointPositionInViewer(self, cp):
         assert cp.shape[0]==2, "capture point should be a 2x1 matrix"
