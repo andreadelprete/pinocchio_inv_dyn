@@ -42,8 +42,8 @@ class Simulator (object):
     VIEWER_DT = 0.05;
     DISPLAY_COM = True;
     DISPLAY_CAPTURE_POINT = True;
-    COM_SPHERE_RADIUS           = 0.005;
-    CAPTURE_POINT_SPHERE_RADIUS = 0.005;
+    COM_SPHERE_RADIUS           = 0.01;
+    CAPTURE_POINT_SPHERE_RADIUS = 0.01;
     CONTACT_FORCE_ARROW_RADIUS  = 0.01;
     COM_SPHERE_COLOR            = (1, 0, 0, 1); # red, green, blue, alpha
     CAPTURE_POINT_SPHERE_COLOR  = (0, 1, 0, 1);    
