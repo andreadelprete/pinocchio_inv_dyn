@@ -20,6 +20,10 @@ import cProfile
 np.set_printoptions(precision=2, suppress=True, linewidth=100);
 EPS = 1e-5;
 
+class Bunch:
+    def __init__(self, **kwds):
+        self.__dict__.update(kwds);
+
 
 class StabilityCriterion(object):
     _name = ""
@@ -72,17 +76,18 @@ class StabilityCriterion(object):
     def can_I_stop(self, c0=None, dc0=None, T_0=0.5, MAX_ITER=1000):
         ''' Determine whether the system can come to a stop without changing contacts.
             Keyword arguments:
-            c0 -- initial CoM position 
-            dc0 -- initial CoM velocity 
-            contact points -- a matrix containing the contact points
-            contact normals -- a matrix containing the contact normals
-            mu -- friction coefficient (either a scalar or an array)
-            mass -- the robot mass
-            T_0 -- an initial guess for the time to stop
-            Output: (is_stable, c_final, dc_final), where:
-            is_stable -- boolean value
-            c_final -- final com position
-            dc_final -- final com velocity
+              c0 -- initial CoM position 
+              dc0 -- initial CoM velocity 
+              contact points -- a matrix containing the contact points
+              contact normals -- a matrix containing the contact normals
+              mu -- friction coefficient (either a scalar or an array)
+              mass -- the robot mass
+              T_0 -- an initial guess for the time to stop
+            Output: An object containing the following member variables:
+              is_stable -- boolean value
+              c -- final com position
+              dc -- final com velocity
+              t -- time taken to reach the final com state
         '''
         #- Initialize: alpha=0, Dalpha=||dc0||
         #- LOOP:
@@ -109,6 +114,7 @@ class StabilityCriterion(object):
             self._com_acc_solver.set_com_state(self._c0, self._dc0);
         
         # Initialize: alpha=0, Dalpha=||dc0||
+        t_int = 0.0;
         alpha = 0.0;
         Dalpha = norm(self._dc0);
         last_iteration = False;
@@ -118,13 +124,13 @@ class StabilityCriterion(object):
         
         if(Dalpha==0.0):
             r = self._equilibrium_solver.compute_equilibrium_robustness(self._c0);
-            return (r>=0.0, self._c0, self._dc0);
+            return Bunch(is_stable=r>=0.0, c=self._c0, dc=self._dc0, t=0.0);
 
         for iiii in range(MAX_ITER):
             if(last_iteration):
                 if(self._verb>0):
                     print "[%s] Algorithm converged to Dalpha=%.3f" % (self._name, Dalpha);
-                return (False, self._c0+alpha*self.v, Dalpha*self.v);
+                return Bunch(is_stable=False, c=self._c0+alpha*self.v, dc=Dalpha*self.v, t=t_int);
 
             (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha, MAX_ITER);
             
@@ -133,14 +139,15 @@ class StabilityCriterion(object):
             
             if(imode!=0):
                 # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
-                return (False, self._c0+alpha*self.v, Dalpha*self.v);
+                return Bunch(is_stable=False, c=self._c0+alpha*self.v, dc=Dalpha*self.v, t=t_int);
 
             if(self._verb>0):
                 print "[%s] DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, DDalpha_min, alpha, Dalpha, alpha_max, a);
 
             if(DDalpha_min>-EPS):
-                # if minimum com acceleration is positive, it means I cannot stop
-                return (False, self._c0+alpha*self.v, Dalpha*self.v);
+                if(self._verb>0):
+                    print "[%s] Minimum com acceleration is positive, so I cannot stop"%(self._name);
+                return Bunch(is_stable=False, c=self._c0+alpha*self.v, dc=Dalpha*self.v, t=t_int);
 
             # DDalpha_min is the acceleration corresponding to the current value of alpha
             # compute DDalpha_0, that is the acceleration corresponding to alpha=0
@@ -163,12 +170,12 @@ class StabilityCriterion(object):
                 # to bring the velocity to zero:
                 #     Dalpha(t) = Dalpha(0) + t*DDalpha = 0
                 #     t = -Dalpha(0)/DDalpha
-                t = - Dalpha / DDalpha_min;
-                alpha_t  = alpha + t*Dalpha + 0.5*t*t*DDalpha_min;
+                t_zero = - Dalpha / DDalpha_min;
+                alpha_t  = alpha + t_zero*Dalpha + 0.5*t_zero*t_zero*DDalpha_min;
                 if(alpha_t <= alpha_max+EPS):
                     if(self._verb>0):
                         print "DDalpha_min is independent from alpha, algorithm converged to Dalpha=0";
-                    return (True, self._c0+alpha_t*self.v, 0.0*self.v);
+                    return Bunch(is_stable=True, c=self._c0+alpha_t*self.v, dc=0.0*self.v, t=t_int+t_zero);
 
                 # if alpha reaches alpha_max before the velocity is zero, then compute the time needed to reach alpha_max
                 #     alpha(t) = alpha(0) + t*Dalpha(0) + 0.5*t*t*DDalpha = alpha_max
@@ -215,10 +222,12 @@ class StabilityCriterion(object):
                     if(self._verb>0):
                         print "[%s] Algorithm converged to Dalpha=0"%self._name;
                     self._innerIterations += jjjj;
-                    return (True, self._c0+alpha_t*self.v, Dalpha_t*self.v);
+                    t_int += t;
+                    return Bunch(is_stable=True, c=self._c0+alpha_t*self.v, dc=Dalpha_t*self.v, t=t_int);
                 if(abs(alpha_t-alpha_max)<EPS and Dalpha_t>0):
                     alpha = alpha_max+EPS;
                     Dalpha = Dalpha_t;
+                    t_int += t;
                     bisection_converged = True;
                     self._innerIterations += jjjj;
                     break;
@@ -456,27 +465,27 @@ def test(N_CONTACTS = 2):
    
     stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=0);
     try:
-        (has_stopped, c_final, dc_final) = stabilitySolver.can_I_stop();
+        res = stabilitySolver.can_I_stop();
     except Exception as e:
         print "\n *** New algorithm failed:", e,"\nRe-running the algorithm with high verbosity\n"
         stabilitySolver._verb = 1;
         try:
-            (has_stopped, c_final, dc_final) = stabilitySolver.can_I_stop();
+            res = stabilitySolver.can_I_stop();
         except Exception as e:
             pass;
         
     try:
-        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, DO_PLOTS=DO_PLOTS);
-        if((has_stopped != has_stopped2) or 
-            not np.allclose(c_final, c_final2, atol=1e-3) or 
-            not np.allclose(dc_final, dc_final2, atol=1e-3)):
+        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=0, DO_PLOTS=DO_PLOTS);
+        if((res.is_stable != has_stopped2) or 
+            not np.allclose(res.c, c_final2, atol=1e-3) or 
+            not np.allclose(res.dc, dc_final2, atol=1e-3)):
             print "\nERROR: the two algorithms gave different results!"
-            print "New algorithm:", has_stopped, c_final, dc_final;
+            print "New algorithm:", res.is_stable, res.c, res.dc;
             print "Old algorithm:", has_stopped2, c_final2, dc_final2;
-            print "Errors:", norm(c_final-c_final2), norm(dc_final-dc_final2), "\n";
+            print "Errors:", norm(res.c-c_final2), norm(res.dc-dc_final2), "\n";
     except Exception as e:
         print "\n\n *** Old algorithm failed: ", e
-        print "Results of new algorithm is", has_stopped, "c0", c0, "dc0", dc0, "cFinal", c_final, "dcFinal", dc_final,"\n";
+        print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
         
     return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
         
@@ -486,6 +495,8 @@ if __name__=="__main__":
     maxOutIter = 0;
     maxInIter = 0;
     N_CONTACTS = 2;
+    # test 392 with 2 contacts give different results
+    # test 264 with 3 contacts give different results
     for i in range(0,500):
         try:
             np.random.seed(i);
