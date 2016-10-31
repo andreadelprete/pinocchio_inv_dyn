@@ -13,7 +13,9 @@ from math import sqrt, atan, pi
 import warnings
 
 
-EPS = 1e-5          
+EPS = 1e-5
+INITIAL_HESSIAN_REGULARIZATION = 1e-8;
+MAX_HESSIAN_REGULARIZATION = 1e-4;
 
 class ComAccLP (object):
     """
@@ -129,7 +131,7 @@ class ComAccLP (object):
         self.n              = contact_points.shape[0]*4 + 1;
         self.qpOasesSolver  = SQProblem(self.n,self.m_in); #, HessianType.SEMIDEF);
         self.qpOasesSolver.setOptions(self.options);
-        self.Hess = 1e-8*np.identity(self.n);
+        self.Hess = INITIAL_HESSIAN_REGULARIZATION*np.identity(self.n);
         self.grad = np.ones(self.n)*regularization;
         self.grad[-1] = 1.0;
         self.constrMat = np.zeros((self.m_in,self.n));
@@ -229,21 +231,28 @@ class ComAccLP (object):
         maxComputationTime  = np.array(maxTime);
         self.constrUB[:6]   = np.dot(self.b, alpha) + self.d;
         self.constrLB[:6]   = self.constrUB[:6];
-        if(not self.initialized):
-            self.imode = self.qpOasesSolver.init(self.Hess, self.grad, self.constrMat, self.lb, self.ub, self.constrLB, 
-                                                 self.constrUB, maxActiveSetIter, maxComputationTime);
-            if(self.imode==0):
-                self.initialized = True;
-        else:
-            self.imode = self.qpOasesSolver.hotstart(self.grad, self.lb, self.ub, self.constrLB, 
-                                                     self.constrUB, maxActiveSetIter, maxComputationTime);
-            if(self.imode==PyReturnValue.UNKNOWN_BUG):
-                self.qpOasesSolver  = SQProblem(self.n,self.m_in);
-                self.qpOasesSolver.setOptions(self.options);
-                maxActiveSetIter    = np.array([maxIter]);
-                maxComputationTime  = np.array(maxTime);
+
+        while(True):
+            if(not self.initialized):
                 self.imode = self.qpOasesSolver.init(self.Hess, self.grad, self.constrMat, self.lb, self.ub, self.constrLB, 
                                                      self.constrUB, maxActiveSetIter, maxComputationTime);
+            else:
+                self.imode = self.qpOasesSolver.hotstart(self.grad, self.lb, self.ub, self.constrLB, 
+                                                         self.constrUB, maxActiveSetIter, maxComputationTime);
+            if(self.imode==0):
+                self.initialized = True;
+            if(self.imode==0 or 
+               self.imode==PyReturnValue.INIT_FAILED_INFEASIBILITY or 
+               self.imode==PyReturnValue.HOTSTART_STOPPED_INFEASIBILITY or
+               self.Hess[0,0]>=MAX_HESSIAN_REGULARIZATION):
+                break;
+            self.initialized = False;
+            self.Hess *= 10.0;
+            maxActiveSetIter    = np.array([maxIter]);
+            maxComputationTime  = np.array(maxTime);
+            if(self.verb>-1):
+                print "[%s] WARNING %s. Increasing Hessian regularization to %f"%(self.name, qpOasesSolverMsg(self.imode), self.Hess[0,0]);
+            
         self.qpTime = maxComputationTime;
         self.iter   = 1+maxActiveSetIter[0];
         if(self.imode==0):
