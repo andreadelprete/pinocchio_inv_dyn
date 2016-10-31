@@ -117,6 +117,7 @@ class InvDynFormulation (object):
     
     B_sp = None;     # 2d support polygon: B_sp*x + b_sp >= 0
     b_sp = None;
+    support_polygon_computed = False;
     
     contact_points = None;  # 3xN matrix containing the contact points in world frame
     contact_normals = None; # 3xN matrix containing the contact normals in world frame
@@ -329,9 +330,12 @@ class InvDynFormulation (object):
 #            self.plotSupportPolygon();
             self.B_sp = np.matrix(self.B_sp);
             self.b_sp = np.matrix(self.b_sp).T;
+        self.support_polygon_computed = True;
             
     ''' Get the matrix B and vector b representing the 2d support polygon as B*x+b>=0 '''
     def getSupportPolygon(self):
+        if(not self.support_polygon_computed):
+            self.updateSupportPolygon();
         return (np.matrix.copy(self.B_sp), np.matrix.copy(self.b_sp));
         
     def plotSupportPolygon(self):
