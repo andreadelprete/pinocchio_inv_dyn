@@ -112,15 +112,16 @@ class ComAccLP (object):
         assert np.asarray(v).squeeze().shape[0]==3, "Com acceleration direction vector has not size 3"
         self.c0 = np.asarray(c0).squeeze();
         self.v = np.asarray(v).squeeze().copy();
-        if(norm(v)==0.0):
+        if(norm(self.v)==0.0):
             raise ValueError("[%s] Norm of com acceleration direction v is zero!"%self.name);
         self.v /= norm(self.v);
 
         self.constrMat[:3,-1] = self.mass*self.v;
         self.constrMat[3:,-1] = self.mass*np.cross(self.c0, self.v);
-        self.b[3:] = self.mass*np.cross(v, self.g);
+        self.b[3:] = self.mass*np.cross(self.v, self.g);
         self.d[:3] = self.mass*self.g;
         self.d[3:] = self.mass*np.cross(c0, self.g);
+        self.initialized    = False;
 
 
     def set_contacts(self, contact_points, contact_normals, mu, regularization=1e-5):
@@ -128,29 +129,32 @@ class ComAccLP (object):
         (self.A, self.G4) = compute_centroidal_cone_generators(contact_points, contact_normals, mu);
         
         # since the size of the problem may have changed we need to recreate the solver and all the problem matrices/vectors
-        self.n              = contact_points.shape[0]*4 + 1;
-        self.qpOasesSolver  = SQProblem(self.n,self.m_in); #, HessianType.SEMIDEF);
-        self.qpOasesSolver.setOptions(self.options);
-        self.Hess = INITIAL_HESSIAN_REGULARIZATION*np.identity(self.n);
-        self.grad = np.ones(self.n)*regularization;
-        self.grad[-1] = 1.0;
-        self.constrMat = np.zeros((self.m_in,self.n));
+        if(self.n != contact_points.shape[0]*4 + 1):
+            self.n              = contact_points.shape[0]*4 + 1;
+            self.qpOasesSolver  = SQProblem(self.n,self.m_in); #, HessianType.SEMIDEF);
+            self.qpOasesSolver.setOptions(self.options);
+            self.constrMat = np.zeros((self.m_in,self.n));
+            self.constrMat[:3,-1] = self.mass*self.v;
+            self.constrMat[3:,-1] = self.mass*np.cross(self.c0, self.v);
+            self.lb = np.zeros(self.n);
+            self.lb[-1] = -1e100;
+            self.ub = np.array(self.n*[1e100,]);
+            self.x  = np.zeros(self.n);
+            self.y  = np.zeros(self.n+self.m_in);
+            self.Hess = INITIAL_HESSIAN_REGULARIZATION*np.identity(self.n);
+            self.grad = np.ones(self.n);
+            self.grad[-1] = 1.0;
+
+        self.grad[:-1] = regularization;
         self.constrMat[:,:-1] = self.A;
-        self.constrMat[:3,-1] = self.mass*self.v;
-        self.constrMat[3:,-1] = self.mass*np.cross(self.c0, self.v);
-        self.lb = np.zeros(self.n);
-        self.lb[-1] = -1e100;
-        self.ub = np.array(self.n*[1e100,]);
-        self.x  = np.zeros(self.n);
-        self.y  = np.zeros(self.n+self.m_in);
         self.initialized    = False;
 
 
     def set_problem_data(self, c0, v, contact_points, contact_normals, mu, g, mass, regularization=1e-5):
-        assert g.shape[0]==3, "Gravity vector has not size 3"
+        assert np.asarray(g).squeeze().shape[0]==3, "Gravity vector has not size 3"
         assert mass>0.0, "Mass is not positive"
         self.mass = mass;
-        self.g = np.asarray(g).squeeze();
+        self.g = np.asarray(g).squeeze().copy();
         self.set_contacts(contact_points, contact_normals, mu, regularization);
         self.set_com_state(c0, v);
         
@@ -186,7 +190,7 @@ class ComAccLP (object):
         # Check that the solution you get by solving the KKT is the same found by the solver
         x_kkt = K_inv_k1*self.alpha + K_inv_k2;
         if(norm(self.x - x_kkt) > 10*EPS):
-            warnings.warn("[%s] ERROR x different from x_kkt. x=" % (self.name)+str(self.x)+"\nx_kkt="+str(x_kkt)+" "+str(norm(self.x - x_kkt)));
+            warnings.warn("[%s] ERROR x different from x_kkt. |x-x_kkt|=%f" % (self.name, norm(self.x - x_kkt)));
         # store the derivative of the solution w.r.t. the parameter alpha
         dx = K_inv_k1[-1];
         # act_set_mat * alpha >= act_set_vec
