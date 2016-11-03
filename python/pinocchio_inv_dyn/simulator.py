@@ -749,11 +749,11 @@ class Simulator (object):
         if(self.time_step%int(self.VIEWER_DT/self.dt)==0):
             for (name, p, f) in zip(contact_names, contact_points, contact_forces):
                 if(name not in self.contact_force_arrow_names):
-                    self.viewer.addArrow(name, self.CONTACT_FORCE_ARROW_RADIUS, p, p+self.CONTACT_FORCE_ARROW_SCALE*f, self.CONTACT_FORCE_ARROW_COLOR);
+                    self.viewer.addArrow(name, self.CONTACT_FORCE_ARROW_RADIUS, p, p+self.CONTACT_FORCE_ARROW_SCALE*f[:3], self.CONTACT_FORCE_ARROW_COLOR);
                     self.viewer.setVisibility(name, "ON");
                     self.contact_force_arrow_names += [name];
                 else:
-                    self.viewer.moveArrow(name, p, p+self.CONTACT_FORCE_ARROW_SCALE*f);
+                    self.viewer.moveArrow(name, p, p+self.CONTACT_FORCE_ARROW_SCALE*f[:3]);
                     
             for name in self.viewer.arrow_radius:
                 if(name not in contact_names):
