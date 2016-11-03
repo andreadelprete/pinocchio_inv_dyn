@@ -33,6 +33,7 @@ class StabilityCriterion(object):
     _equilibrium_solver = None;
     _c0 = None;
     _dc0 = None;
+    _v = None;
     
     _computationTime = 0.0;
     _outerIterations = 0;
@@ -47,30 +48,33 @@ class StabilityCriterion(object):
         '''
         assert mass>0.0, "Mass is not positive"
         assert mu>0.0, "Friction coefficient is not positive"
-        c0 = np.asarray(c0).squeeze();
-        dc0 = np.asarray(dc0).squeeze();
-        contact_points = np.asarray(contact_points);
-        contact_normals = np.asarray(contact_normals);
-        assert c0.shape[0]==3, "Com position vector has not size 3"
-        assert dc0.shape[0]==3, "Com velocity vector has not size 3"
-        assert contact_points.shape[1]==3, "Contact points have not size 3"
-        assert contact_normals.shape[1]==3, "Contact normals have not size 3"
-        assert contact_points.shape[0]==contact_normals.shape[0], "Number of contact points do not match number of contact normals"
-        self._name       = name;
-        self._maxIter    = maxIter;
-        self._verb       = verb;
-        self._c0          = c0.copy();
-        self._dc0         = dc0.copy();
+        assert np.asarray(c0).squeeze().shape[0]==3, "Com position vector has not size 3"
+        assert np.asarray(dc0).squeeze().shape[0]==3, "Com velocity vector has not size 3"
+        assert np.asarray(contact_points).shape[1]==3, "Contact points have not size 3"
+        assert np.asarray(contact_normals).shape[1]==3, "Contact normals have not size 3"
+        assert np.asarray(contact_points).shape[0]==np.asarray(contact_normals).shape[0], "Number of contact points do not match number of contact normals"
+        self._name              = name;
+        self._maxIter           = maxIter;
+        self._verb              = verb;
+        self._c0                = np.asarray(c0).squeeze().copy();
+        self._dc0               = np.asarray(dc0).squeeze().copy();
+        self._mass              = mass;
+        self._g                 = np.asarray(g).squeeze().copy();
+#        self._regularization    = regularization;
+#        self._mu                = mu;
+#        self._contact_points    = np.asarray(contact_points).copy();
+#        self._contact_normals   = np.asarray(contact_normals).copy();
         if(norm(self._dc0)!=0.0):
-            self.v = self._dc0/norm(self._dc0);
+            self._v = self._dc0/norm(self._dc0);
         else:
-            self.v = np.array([1.0, 0.0, 0.0]);
-        self._com_acc_solver  = ComAccLP(name, c0, self.v, contact_points, contact_normals, mu, g, mass, maxIter, verb, regularization);
-        self._equilibrium_solver = RobustEquilibriumDLP(name, contact_points, contact_normals, mu, g, mass, verb=verb);
+            self._v = np.array([1.0, 0.0, 0.0]);
+        self._com_acc_solver  = ComAccLP(self._name, self._c0, self._v, contact_points, contact_normals, mu, self._g, self._mass, maxIter, verb, regularization);
+        self._equilibrium_solver = RobustEquilibriumDLP(name, contact_points, contact_normals, mu, self._g, self._mass, verb=verb);
         
 
     def set_contacts(self, contact_points, contact_normals, mu):
         self._com_acc_solver.set_contacts(contact_points, contact_normals, mu);
+        self._equilibrium_solver = RobustEquilibriumDLP(self._name, contact_points, contact_normals, mu, self._g, self._mass, verb=self._verb);
 
 
     def can_I_stop(self, c0=None, dc0=None, T_0=0.5, MAX_ITER=1000):
@@ -109,10 +113,10 @@ class StabilityCriterion(object):
             assert np.asarray(dc0).squeeze().shape[0]==3, "CoM velocity has not size 3"
             self._dc0 = np.asarray(dc0).squeeze().copy();
             if(norm(self._dc0)!=0.0):
-                self.v = self._dc0/norm(self._dc0);
+                self._v = self._dc0/norm(self._dc0);
         if((c0 is not None) or (dc0 is not None)):
-            self._com_acc_solver.set_com_state(self._c0, self._dc0);
-        
+            self._com_acc_solver.set_com_state(self._c0, self._v);
+            
         # Initialize: alpha=0, Dalpha=||dc0||
         t_int = 0.0;
         alpha = 0.0;
@@ -130,7 +134,7 @@ class StabilityCriterion(object):
             if(last_iteration):
                 if(self._verb>0):
                     print "[%s] Algorithm converged to Dalpha=%.3f" % (self._name, Dalpha);
-                return Bunch(is_stable=False, c=self._c0+alpha*self.v, dc=Dalpha*self.v, t=t_int);
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
 
             (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha, MAX_ITER);
             
@@ -139,7 +143,7 @@ class StabilityCriterion(object):
             
             if(imode!=0):
                 # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
-                return Bunch(is_stable=False, c=self._c0+alpha*self.v, dc=Dalpha*self.v, t=t_int);
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
 
             if(self._verb>0):
                 print "[%s] DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, DDalpha_min, alpha, Dalpha, alpha_max, a);
@@ -147,7 +151,7 @@ class StabilityCriterion(object):
             if(DDalpha_min>-EPS):
                 if(self._verb>0):
                     print "[%s] Minimum com acceleration is positive, so I cannot stop"%(self._name);
-                return Bunch(is_stable=False, c=self._c0+alpha*self.v, dc=Dalpha*self.v, t=t_int);
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
 
             # DDalpha_min is the acceleration corresponding to the current value of alpha
             # compute DDalpha_0, that is the acceleration corresponding to alpha=0
@@ -175,7 +179,7 @@ class StabilityCriterion(object):
                 if(alpha_t <= alpha_max+EPS):
                     if(self._verb>0):
                         print "DDalpha_min is independent from alpha, algorithm converged to Dalpha=0";
-                    return Bunch(is_stable=True, c=self._c0+alpha_t*self.v, dc=0.0*self.v, t=t_int+t_zero);
+                    return Bunch(is_stable=True, c=self._c0+alpha_t*self._v, dc=0.0*self._v, t=t_int+t_zero);
 
                 # if alpha reaches alpha_max before the velocity is zero, then compute the time needed to reach alpha_max
                 #     alpha(t) = alpha(0) + t*Dalpha(0) + 0.5*t*t*DDalpha = alpha_max
@@ -223,7 +227,7 @@ class StabilityCriterion(object):
                         print "[%s] Algorithm converged to Dalpha=0"%self._name;
                     self._innerIterations += jjjj;
                     t_int += t;
-                    return Bunch(is_stable=True, c=self._c0+alpha_t*self.v, dc=Dalpha_t*self.v, t=t_int);
+                    return Bunch(is_stable=True, c=self._c0+alpha_t*self._v, dc=Dalpha_t*self._v, t=t_int);
                 if(abs(alpha_t-alpha_max)<EPS and Dalpha_t>0):
                     alpha = alpha_max+EPS;
                     Dalpha = Dalpha_t;
@@ -276,7 +280,7 @@ class StabilityCriterion(object):
             assert np.asarray(dc0).squeeze().shape[0]==3, "CoM velocity has not size 3"
             self._dc0 = np.asarray(dc0).squeeze().copy();
             if(norm(self._dc0)!=0.0):
-                self.v = self._dc0/norm(self._dc0);
+                self._v = self._dc0/norm(self._dc0);
         if((c0 is not None) or (dc0 is not None)):
             self._com_acc_solver.set_com_state(self._c0, self._dc0);
         
@@ -302,7 +306,7 @@ class StabilityCriterion(object):
             
             if(imode!=0):
                 # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
-                return (t_int, self._c0+alpha*self.v, Dalpha*self.v);
+                return (t_int, self._c0+alpha*self._v, Dalpha*self._v);
 
             if(self._verb>0):
                 print "[%s] t=%.3f, DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, t_int, DDalpha_min, alpha, Dalpha, alpha_max, a);
@@ -326,7 +330,7 @@ class StabilityCriterion(object):
                     if(self._verb>0):
                         print "DDalpha_min is independent from alpha, algorithm converged to Dalpha=0";
                     # hypothesis: after I reach Dalpha=0 I can maintain it (i.e. DDalpha=0 is feasible)
-                    return (t_pred, self._c0+alpha_t*self.v, 0.0*self.v);
+                    return (t_pred, self._c0+alpha_t*self._v, 0.0*self._v);
 
                 # if alpha reaches alpha_max before the velocity is zero, then compute the time needed to reach alpha_max
                 #     alpha(t) = alpha(0) + t*Dalpha(0) + 0.5*t*t*DDalpha = alpha_max
@@ -376,7 +380,7 @@ class StabilityCriterion(object):
                     if(self._verb>0):
                         print "[%s] Algorithm converged to Dalpha=%.3f"%(self._name, Dalpha_t);
                     self._innerIterations += jjjj;
-                    return (t_pred, self._c0+alpha_t*self.v, Dalpha_t*self.v);
+                    return (t_pred, self._c0+alpha_t*self._v, Dalpha_t*self._v);
 
                 if(abs(alpha_t-alpha_max)<EPS and Dalpha_t>0):
                     alpha = alpha_max+EPS;
