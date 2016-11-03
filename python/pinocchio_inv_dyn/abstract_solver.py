@@ -8,7 +8,7 @@ from qpoases import PyOptions as Options
 from qpoases import PyPrintLevel as PrintLevel
 from qpoases import PyReturnValue
 from qpoases import PySolutionAnalysis as SolutionAnalysis
-from qpoases import PyHessianType as HessianType
+from qpoases import PyHessianType as HessianType # 'IDENTITY', 'INDEF', 'POSDEF', 'POSDEF_NULLSPACE', 'SEMIDEF', 'UNKNOWN', 'ZERO'
 from qpoases import PySubjectToStatus as SubjectToStatus
 from qpoases import PyBooleanType as BooleanType
 import time
@@ -30,7 +30,7 @@ class AbstractSolver (object):
     
     name = "";  # solver name
     n = 0;      # number of variables
-    m_in = 0;   # number of inequalities
+    m_in = -1;  # number of inequalities
     
     D = [];     # quadratic cost matrix
     d = [];     # quadratic cost vector
@@ -82,10 +82,13 @@ class AbstractSolver (object):
                 
     def changeInequalityNumber(self, m_in):
 #        print "[%s] Changing number of inequality constraints from %d to %d" % (self.name, self.m_in, m_in);
+        if(m_in==self.m_in):
+            return;
         self.m_in       = m_in;
         self.iter       = 0;
-        self.qpOasesSolver  = SQProblem(self.n,m_in); #, HessianType.SEMIDEF);
+        self.qpOasesSolver  = SQProblem(self.n,m_in); #, HessianType.POSDEF SEMIDEF
         self.options             = Options();
+        self.options.setToReliable();
         if(self.verb<=0):
             self.options.printLevel  = PrintLevel.NONE;
         elif(self.verb==1):
@@ -95,7 +98,7 @@ class AbstractSolver (object):
         elif(self.verb>2):            
             self.options.printLevel  = PrintLevel.DEBUG_ITER;
             print "set high print level"
-        self.options.enableRegularisation = True;
+#        self.options.enableRegularisation = False;
 #        self.options.enableFlippingBounds = BooleanType.FALSE
 #        self.options.initialStatusBounds  = SubjectToStatus.INACTIVE
 #        self.options.setToMPC();
