@@ -45,6 +45,7 @@ def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
     muu = mu/sqrt(2.0);
     for i in range(nContacts):
         # compute tangent directions
+        assert norm(contact_normals[i,:])!=0.0, "Length of contact normals cannot be zero"
         contact_normals[i,:]  = contact_normals[i,:]/norm(contact_normals[i,:]);
         T1 = np.cross(contact_normals[i,:], [0.,1.,0.]);
         if(norm(T1)<EPS):
