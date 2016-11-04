@@ -255,10 +255,10 @@ class StabilityCriterion(object):
             t_pred -- Future time at which the prediction is made
             c0 -- initial CoM position 
             dc0 -- initial CoM velocity 
-            Output: (t, c_final, dc_final), where:
+            Output: An object with the following member variables:
             t -- time at which the integration has stopped (equal to t_pred, unless something went wrong)
-            c_final -- final com position
-            dc_final -- final com velocity
+            c -- final com position
+            dc -- final com velocity
         '''
         #- Initialize: alpha=0, Dalpha=||dc0||
         #- LOOP:
@@ -287,15 +287,18 @@ class StabilityCriterion(object):
         # Initialize: alpha=0, Dalpha=||dc0||
         alpha = 0.0;
         Dalpha = norm(self._dc0);
+        Dalpha_min = Dalpha;    # minimum velocity found while integrating
         self._computationTime = 0.0;
         self._outerIterations = 0;
         self._innerIterations = 0;
         t_int = 0.0;    # current time
+        t_min = 0.0;    # time corresponding to minimum velocity
+        min_vel_reached = False;
         
         if(Dalpha==0.0):
             r = self._equilibrium_solver.compute_equilibrium_robustness(self._c0);
             if(r>=0.0):
-                return (t_pred, self._c0, self._dc0);
+                return Bunch(t=t_pred, c=self._c0, dc=self._dc0, t_min=0.0, dc_min=self._dc0);
             raise ValueError("[%s] NOT IMPLEMENTED YET: initial velocity is zero but system is not in static equilibrium!"%(self._name));
 
         for iiii in range(MAX_ITER):
@@ -306,7 +309,9 @@ class StabilityCriterion(object):
             
             if(imode!=0):
                 # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
-                return (t_int, self._c0+alpha*self._v, Dalpha*self._v);
+                if(min_vel_reached):
+                    return Bunch(t=t_int, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t_min=t_min, dc_min=Dalpha_min*self._v);
+                return Bunch(t=t_int, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t_min=t_int, dc_min=Dalpha*self._v);
 
             if(self._verb>0):
                 print "[%s] t=%.3f, DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, t_int, DDalpha_min, alpha, Dalpha, alpha_max, a);
@@ -314,6 +319,19 @@ class StabilityCriterion(object):
             # DDalpha_min is the acceleration corresponding to the current value of alpha
             # compute DDalpha_0, that is the acceleration corresponding to alpha=0
             DDalpha_0 = DDalpha_min - a*alpha;
+            
+            if(not min_vel_reached):
+                if(DDalpha_min>=0.0):
+                    min_vel_reached = True;
+                    Dalpha_min = Dalpha;
+                    t_min = t_int;
+                elif( DDalpha_0 + a*alpha_max > 0.0):
+                    # If we have not found yet the point of minimum velocity,
+                    # if DDalpha_min is not always negative on the current segment then update 
+                    # alpha_max to the point where DDalpha_min becomes zero
+                    alpha_max = -DDalpha_0 / a;
+                    if(self._verb>0):
+                        print "[%s] Updated alpha_max %.3f"%(self._name, alpha_max);
                         
             # Initialize initial guess and bounds on integration time
             t_ub = t_pred-t_int;
@@ -330,7 +348,7 @@ class StabilityCriterion(object):
                     if(self._verb>0):
                         print "DDalpha_min is independent from alpha, algorithm converged to Dalpha=0";
                     # hypothesis: after I reach Dalpha=0 I can maintain it (i.e. DDalpha=0 is feasible)
-                    return (t_pred, self._c0+alpha_t*self._v, 0.0*self._v);
+                    return Bunch(t=t_pred, c=self._c0+alpha_t*self._v, dc=0.0*self._v, t_min=t_int+t, dc_min=0*self._v);
 
                 # if alpha reaches alpha_max before the velocity is zero, then compute the time needed to reach alpha_max
                 #     alpha(t) = alpha(0) + t*Dalpha(0) + 0.5*t*t*DDalpha = alpha_max
@@ -380,7 +398,9 @@ class StabilityCriterion(object):
                     if(self._verb>0):
                         print "[%s] Algorithm converged to Dalpha=%.3f"%(self._name, Dalpha_t);
                     self._innerIterations += jjjj;
-                    return (t_pred, self._c0+alpha_t*self._v, Dalpha_t*self._v);
+                    if(min_vel_reached):
+                        return Bunch(t=t_pred, c=self._c0+alpha_t*self._v, dc=Dalpha_t*self._v, t_min=t_min, dc_min=Dalpha_min*self._v);
+                    return Bunch(t=t_pred, c=self._c0+alpha_t*self._v, dc=Dalpha_t*self._v, t_min=t_pred, dc_min=Dalpha_t*self._v);
 
                 if(abs(alpha_t-alpha_max)<EPS and Dalpha_t>0):
                     alpha = alpha_max+EPS;
@@ -393,7 +413,7 @@ class StabilityCriterion(object):
                 if(alpha_t<alpha_max and Dalpha_t>0):       
                     t_lb=t;
                     t=0.5*(t_ub+t_lb);
-                else:                                      
+                else:
                     t_ub=t; 
                     t=0.5*(t_ub+t_lb);
             
