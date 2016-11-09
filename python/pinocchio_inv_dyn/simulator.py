@@ -760,3 +760,13 @@ class Simulator (object):
                     self.viewer.setVisibility(name, "OFF");
                     
             self.contact_force_arrow_names = list(contact_names);
+
+    def updateContactForcesInViewerFromConstraints(self, contact_constraints, f):
+        contact_names  = [con.name for con in contact_constraints];
+        contact_sizes  = [con.dim for con in contact_constraints];
+        contact_size_cum = [int(np.sum(contact_sizes[:ii])) for ii in range(len(contact_sizes))];
+        contact_points = [con.framePosition().translation for con in contact_constraints];
+        contact_forces = [ f[ii:ii+3] for ii in contact_size_cum];
+        return self.updateContactForcesInViewer(contact_names, contact_points, contact_forces);
+
+            
