@@ -13,7 +13,7 @@ from math import sqrt, atan, pi
 import warnings
 
 
-EPS = 1e-5
+EPS = 1e-3; #5
 INITIAL_HESSIAN_REGULARIZATION = 1e-8;
 MAX_HESSIAN_REGULARIZATION = 1e-4;
 
@@ -168,7 +168,7 @@ class ComAccLP (object):
         n_as = act_set.shape[0];
         if(n_as > self.n-6):
             raise ValueError("[%s] ERROR Too many active constraints: %d (rather than %d)" % (self.name, n_as, self.n-6));
-        if(self.verb>0 and n_as < self.n-6):
+        if(self.verb>1 and n_as < self.n-6):
             print "[%s] INFO Less active constraints than expected: %d (rather than %d)" % (self.name, n_as, self.n-6);
         self.K = np.zeros((n_as+6,self.n));
         self.k1 = np.zeros(n_as+6);
@@ -311,7 +311,7 @@ class ComAccPP(object):
     def __init__(self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, verb=0):
         self.name = name;
         self.verb = verb;
-        (H,h) = compute_GIWC(contact_points, contact_normals, mu, False, True);
+        (H,h) = compute_GIWC(contact_points, contact_normals, mu);
         ''' Project GIWC in (alpha,DDalpha) space, where c=c0+alpha*v, ddc=DDalpha*v, v=dc0/||dc0||: a*alpha + b*DDalpha <= d '''
         v = dc0/norm(dc0);
         K = np.zeros((6,3));
@@ -341,18 +341,17 @@ class ComAccPP(object):
         imode = 0;
         ''' Find current active inequality: b*DDalpha <= d - a*alpha (i.e. DDalpha lower bound for current alpha value) ''' 
         #sort b indices to only keep negative values
-        negative_ids = np.where(self.b<0)[0];
+        negative_ids = np.where(self.b<-EPS)[0];
         a_alpha_d = self.a*alpha-self.d;
         a_alpha_d_negative_bs = a_alpha_d[negative_ids];
         (i_DDalpha_min, DDalpha_min) = [(i,a_min) for (i, a_min) in [(j, a_alpha_d[j]) for j in negative_ids] if (a_min >= a_alpha_d_negative_bs).all()][0];
         ''' Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality) '''
         den = self.b*self.a[i_DDalpha_min] + self.a;
-        i_pos = np.where(den>0)[0];
+        i_pos = np.where(den>EPS)[0];
         if(i_pos.shape[0]==0):
             if(self.verb>0):
-                print "[%s] ERROR b*a_i0+a is never positive, that means that alpha_max is unbounded"%self.name, den;
-            alpha_max = alpha;
-            imode = 1;
+                print "[%s] INFO b*a_i0+a is never positive, that means that alpha_max is unbounded"%self.name, den;
+            alpha_max = 1e100;
         else:
             alpha_max = np.min((self.d[i_pos] + self.b[i_pos]*self.d[i_DDalpha_min])/den[i_pos]);
             if(alpha_max<alpha):
@@ -372,25 +371,24 @@ class ComAccPP(object):
         plt.show();
         
         
-def test():    
-    np.set_printoptions(precision=1, suppress=True, linewidth=100);
+def test(N_CONTACTS = 2, verb=0):    
+    np.set_printoptions(precision=2, suppress=True, linewidth=250);
     DO_PLOTS = False;
     PLOT_3D = False;
     mass = 75;             # mass of the robot
     g_vector = np.array([0,0,-9.81]);
-    mu = 0.3;           # friction coefficient
+    mu = 0.5;           # friction coefficient
     lx = 0.1;           # half foot size in x direction
     ly = 0.07;          # half foot size in y direction
     USE_DIAGONAL_GENERATORS = True;
-    GENERATE_QUASI_FLAT_CONTACTS = True;
+    GENERATE_QUASI_FLAT_CONTACTS = False;
     #First, generate a contact configuration
-    CONTACT_POINT_UPPER_BOUNDS = [ 0.5,  0.5,  0.0];
+    CONTACT_POINT_UPPER_BOUNDS = [ 0.5,  0.5,  0.5];
     CONTACT_POINT_LOWER_BOUNDS = [-0.5, -0.5,  0.0];
     gamma = atan(mu);   # half friction cone angle
-    RPY_LOWER_BOUNDS = [-0*gamma, -0*gamma, -pi];
-    RPY_UPPER_BOUNDS = [+0*gamma, +0*gamma, +pi];
+    RPY_LOWER_BOUNDS = [-2*gamma, -2*gamma, -pi];
+    RPY_UPPER_BOUNDS = [+2*gamma, +2*gamma, +pi];
     MIN_CONTACT_DISTANCE = 0.3;
-    N_CONTACTS = 2;
     
     X_MARG = 0.07;
     Y_MARG = 0.07;
@@ -398,7 +396,8 @@ def test():
     succeeded = False;
     
     while(succeeded == False):
-        (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS);        
+        (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, 
+                                   RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, GENERATE_QUASI_FLAT_CONTACTS);        
         X_LB = np.min(p[:,0]-X_MARG);
         X_UB = np.max(p[:,0]+X_MARG);
         Y_LB = np.min(p[:,1]-Y_MARG);
@@ -439,58 +438,58 @@ def test():
         for s in ss:
             ax.scatter(c0[0]+s*dc0[0],c0[1]+s*dc0[1],c0[2]+s*dc0[2], c='k', marker='x');
         ax.set_xlabel('x'); ax.set_ylabel('y'); ax.set_zlabel('z');
-   
-    comAccLP = ComAccLP("comAccLP", c0, dc0, p, N, mu, g_vector, mass, verb=1, regularization=1e-10);
-    comAccLP2 = ComAccLP("comAccLP2", c0, dc0, p, N, mu, g_vector, mass, verb=1, regularization=1e-5);
-    comAccPP = ComAccPP("comAccPP", c0, dc0, p, N, mu, g_vector, mass, verb=0);
+        
+    comAccLP = ComAccLP("comAccLP", c0, dc0, p, N, mu, g_vector, mass, verb=verb, regularization=1e-5);
+#    comAccLP2 = ComAccLP("comAccLP2", c0, dc0, p, N, mu, g_vector, mass, verb=verb, regularization=1e-5);
+    comAccPP = ComAccPP("comAccPP", c0, dc0, p, N, mu, g_vector, mass, verb=verb);
     alpha = 0.0;
     ddAlpha = -1.0;
     while(ddAlpha<0.0):
         (imode, ddAlpha, slope, alpha_min, alpha_max) = comAccLP.compute_max_deceleration(alpha);
-        (imode3, ddAlpha3, slope3, alpha_min3, alpha_max3) = comAccLP2.compute_max_deceleration(alpha);
-        if(imode==0):
-#            print "LP  ddAlpha_min(%.2f) = %.3f (slope %.3f, alpha_max %.3f, qp time %.3f)"%(alpha,ddAlpha,slope,alpha_max,1e3*comAccLP.qpTime);
-            f = comAccLP.getContactForces();
-#            print "Contact forces:", norm(f, axis=0)
-        else:
+#        (imode3, ddAlpha3, slope3, alpha_min3, alpha_max3) = comAccLP2.compute_max_deceleration(alpha);
+        if(imode!=0):
             print "LP failed!"
             
-        if(imode3==0):
+#        if(imode3==0):
 #            print "LP2 ddAlpha_min(%.2f) = %.3f (slope %.3f, alpha_max %.3f, qp time %.3f)"%(alpha,ddAlpha3,slope3,alpha_max3,1e3*comAccLP2.qpTime);
-            f = comAccLP2.getContactForces();
+#            f = comAccLP2.getContactForces();
 #            print "Contact forces:", norm(f, axis=0)
-        else:
-            print "LP failed!"
+#        else:
+#            print "LP failed!"
 
         (imode2, ddAlpha2, slope2, alpha_max2) = comAccPP.compute_max_deceleration(alpha);            
-        if(imode2==0):
-            pass;
-#            print "PP ddAlpha_min(%.2f) = %.3f (slope %.3f, alpha_max %.3f)"%(alpha,ddAlpha2,slope2,alpha_max2);
-        else:
+        if(imode2!=0):
             print "PP failed!";
             
+        error = False;
         if(imode!= 0 or imode2!=0):
             break;
         if(abs(ddAlpha-ddAlpha2) > 1e-4):
             print "\n *** ERROR ddAlpha", ddAlpha-ddAlpha2;
+            error = True;
         if(abs(slope-slope2) > 1e-3):
             print "\n *** ERROR slope", slope-slope2;
+            error = True;
         if(abs(alpha_max-alpha_max2) > 1e-3):
             if(alpha_max < alpha_max2):
                 print "\n *** WARNING alpha_max underestimated", alpha_max-alpha_max2;
             else:
                 print "\n *** ERROR alpha_max", alpha_max-alpha_max2;
-                
-        if(abs(ddAlpha3-ddAlpha2) > 1e-4):
-            print "\n *** ERROR2 ddAlpha", ddAlpha3-ddAlpha2;
-        if(abs(slope3-slope2) > 1e-3):
-            print "\n *** ERROR2 slope", slope3-slope2;
-        if(abs(alpha_max3-alpha_max2) > 1e-3):
-            if(alpha_max3 < alpha_max2):
-                print "\n *** WARNING2 alpha_max underestimated", alpha_max3-alpha_max2;
-            else:
-                print "\n *** ERROR2 alpha_max", alpha_max3-alpha_max2;
-                
+                error = True;
+
+        if(error and verb>0):
+            print "LP  ddAlpha_min(%.2f) = %.3f (slope %.3f, alpha_max %.3f, qp time %.3f)"%(alpha,ddAlpha,slope,alpha_max,1e3*comAccLP.qpTime);
+            f = comAccLP.getContactForces();
+            #print "Contact forces:\n", f;
+            print "Contact force norms:", norm(f, axis=0);
+            print "Contact force generator coefficients:", comAccLP.x;
+            #print "Contact force generators:\n", comAccLP.G4[:,:16];
+            print "PP ddAlpha_min(%.2f) = %.3f (slope %.3f, alpha_max %.3f)"%(alpha,ddAlpha2,slope2,alpha_max2);
+            print "p:", p.T;
+            print "N", N.T;
+            print "c", c0.T;
+            print "dc", dc0.T;
+                        
         alpha = alpha_max+EPS;
         
 #    print "\n\n\n SECOND TEST \n\n\n"
@@ -530,9 +529,14 @@ def test():
 
 if __name__=="__main__":
     import cProfile
-    for i in range(1):
+    N_CONTACTS = 2;
+    VERB = 1;
+    N_TESTS = range(392,393);
+    
+    for i in N_TESTS:
         try:
-            test();
+            np.random.seed(i);
+            test(N_CONTACTS, VERB);
 #            ret = cProfile.run("test()");
         except Exception as e:
             print e;
