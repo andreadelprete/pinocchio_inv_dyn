@@ -24,6 +24,17 @@ class Bunch:
     def __init__(self, **kwds):
         self.__dict__.update(kwds);
 
+    def __str__(self, prefix=""):
+        res = "";
+        for (key,value) in self.__dict__.iteritems():
+            if (isinstance(value, np.ndarray) and len(value.shape)==2 and value.shape[0]>value.shape[1]):
+                res += prefix+" - " + key + ": " + str(value.T) + "\n";
+            elif (isinstance(value, Bunch)):
+                res += prefix+" - " + key + ":\n" + value.__str__(prefix+"    ") + "\n";
+            else:
+                res += prefix+" - " + key + ": " + str(value) + "\n";
+        return res[:-1];
+
 
 class StabilityCriterion(object):
     _name = ""
@@ -196,13 +207,34 @@ class StabilityCriterion(object):
                     if(t<0.0):
                         # If also the largest time is negative print an ERROR and return
                         raise ValueError("[%s] ERROR: Time is still negative: t=%.3f, alpha=%.3f, Dalpha=%.3f, DDalpha_min=%.3f, alpha_max=%.3f"%(self._name,t,alpha,Dalpha,DDalpha_min,alpha_max));
+            else:
+                # Try to compute the time at which the velocity will be zero:
+                #   Dalpha(t) = omega*sh*alpha + ch*Dalpha + omega*sh*(DDalpha_0/a) = 0
+                #   omega*th*alpha + Dalpha + omega*th*(DDalpha_0/a) = 0
+                #   th*omega*(alpha + DDalpha_0/a) = - Dalpha
+                #   tanh(omega*t) = - Dalpha / (omega*(alpha + DDalpha_0/a))
+                #   omega*t = atanh(- Dalpha / (omega*(alpha + DDalpha_0/a)))
+                #   t = atanh(- Dalpha / (omega*(alpha + DDalpha_0/a))) / omega
+                omega = sqrt(a+0j);
+                tmp = - Dalpha / (omega*(alpha + (DDalpha_0/a)));
+                if(abs(np.real(tmp))<1.0):
+                    t = np.arctanh(tmp) / omega;
+                    if(np.imag(t) != 0.0):
+                        raise ValueError("[%s] ERROR time to reach zero vel is imaginary: "%self._name +str(t)+"a=%.3f"%(a));
+                    t = np.real(t);
+                    t_ub = t;   # use this time as an upper bound for the search
+                else:
+                    # Here I already know that I won't be able to stop, but I keep integrating to find the min velocity I can reach.
+                    if(self._verb>0):
+                        print "[%s] INFO argument of arctanh greater than 1 (%.3f), meaning that zero vel will never be reached"%(self._name,np.real(tmp));  
+                    #return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
                 
+                    
             bisection_converged = False;
             for jjjj in range(MAX_ITER):
                 # Integrate LDS until t: DDalpha = a*alpha - d
                 if(abs(a)>EPS):
                     # if a!=0 then the acceleration is a linear function of the position and I need to use this formula to integrate
-                    omega = sqrt(a+0j);
                     sh = np.sinh(omega*t);
                     ch = np.cosh(omega*t);
                     alpha_t  = ch*alpha + sh*Dalpha/omega - (1.0-ch)*(DDalpha_0/a);
@@ -423,7 +455,7 @@ class StabilityCriterion(object):
         raise ValueError("[%s] Algorithm did not converge in %d iterations"%(self._name, MAX_ITER));
     
     
-def test(N_CONTACTS = 2):
+def test(N_CONTACTS = 2, verb=0):
     from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, can_I_stop
     DO_PLOTS = False;
     PLOT_3D = False;
@@ -487,7 +519,13 @@ def test(N_CONTACTS = 2):
             ax.scatter(c0[0]+s*dc0[0],c0[1]+s*dc0[1],c0[2]+s*dc0[2], c='k', marker='x');
         ax.set_xlabel('x'); ax.set_ylabel('y'); ax.set_zlabel('z');
    
-    stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=0);
+    if(verb>0):
+        print "p:", p.T;
+        print "N", N.T;
+        print "c", c0.T;
+        print "dc", dc0.T;
+        
+    stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb);
     try:
         res = stabilitySolver.can_I_stop();
     except Exception as e:
@@ -496,10 +534,10 @@ def test(N_CONTACTS = 2):
         try:
             res = stabilitySolver.can_I_stop();
         except Exception as e:
-            pass;
+            raise
         
     try:
-        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=0, DO_PLOTS=DO_PLOTS);
+        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
         if((res.is_stable != has_stopped2) or 
             not np.allclose(res.c, c_final2, atol=1e-3) or 
             not np.allclose(res.dc, dc_final2, atol=1e-3)):
@@ -515,26 +553,27 @@ def test(N_CONTACTS = 2):
         
 
 if __name__=="__main__":
-    maxTime = 0.0;
-    maxOutIter = 0;
-    maxInIter = 0;
     N_CONTACTS = 2;
+    VERB = 0;
+    N_TESTS = range(0,100);
+    time    = np.zeros(len(N_TESTS));
+    outIter = np.zeros(len(N_TESTS));
+    inIter  = np.zeros(len(N_TESTS));
     # test 392 with 2 contacts give different results
     # test 264 with 3 contacts give different results
-    for i in range(0,500):
+    j = 0;
+    for i in N_TESTS:
         try:
             np.random.seed(i);
-            (time, outIter, inIter) = test(N_CONTACTS);
-            if(time>maxTime):
-                maxTime = time;
-            if(outIter>maxOutIter):
-                maxOutIter = outIter;
-            if(inIter>maxInIter):
-                maxInIter = inIter;
-            print "Test %3d, time %3.2f, outIter %3d, inIter %3d" % (i, 1e3*time, outIter, inIter);
+            (time[j], outIter[j], inIter[j]) = test(N_CONTACTS, verb=VERB);
+            print "Test %3d, time %3.2f, outIter %3d, inIter %3d" % (i, 1e3*time[j], outIter[j], inIter[j]);
+            j += 1;
 #            ret = cProfile.run("test()");
         except Exception as e:
             print e;
-    print "\nMax computation time %.3f" % (1e3*maxTime);
-    print "Max outer iterations %d" % (maxOutIter);
-    print "Max inner iterations %d" % (maxInIter);
+    print "\nMean computation time %.3f" % (1e3*np.mean(time));
+    print "Mean outer iterations %d" % (np.mean(outIter));
+    print "Mean inner iterations %d" % (np.mean(inIter));
+    print "\nMax computation time %.3f" % (1e3*np.max(time));
+    print "Max outer iterations %d" % (np.max(outIter));
+    print "Max inner iterations %d" % (np.max(inIter));
