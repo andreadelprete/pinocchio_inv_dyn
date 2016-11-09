@@ -312,15 +312,12 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         # Find current active inequality: b*DDalpha <= d - a*alpha (i.e. DDalpha lower bound for current alpha value) 
         a_alpha_d = a*alpha-d;
         a_alpha_d_negative_bs = a_alpha_d[negative_ids];
-        (i_DDalpha_min, DDalpha_min) = [(i,a_min) for (i, a_min) in [(j, a_alpha_d[j]) for j in negative_ids] if (a_min >= a_alpha_d_negative_bs).all()][0]
-        if(verb>0):
-            print "DDalpha_min", DDalpha_min;
-            print "i_DDalpha_min", i_DDalpha_min;
+        (i_DDalpha_min, DDalpha_min) = [(i,a_min) for (i, a_min) in [(j, a_alpha_d[j]) for j in negative_ids] if (a_min >= a_alpha_d_negative_bs).all()][0];
             
         # If DDalpha_lower_bound>0: return False 
         if(DDalpha_min >= -EPS):
             if(verb>0):
-                print "Algorithm converged because DDalpha is positive";
+                print "Algorithm converged because DDalpha_min is positive", DDalpha_min;
             return (False, c0+alpha*v, Dalpha*v);
         
         # Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
@@ -331,8 +328,10 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
             alpha_max = 10.0;
         else:
             alpha_max = np.min((d[i_pos] + b[i_pos]*d[i_DDalpha_min])/den[i_pos]);
-            if(verb>0):
-                print "alpha_max", alpha_max;
+        
+        if(verb>0):
+            print "[can_I_stop] DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (DDalpha_min, alpha, Dalpha, alpha_max, - d[i_DDalpha_min]);
+            
         if(alpha_max<alpha):
             # We reach the right limit of the polytope of feasible com pos-acc.
             # This means there is no feasible com acc for farther com position (with zero angular momentum derivative)
