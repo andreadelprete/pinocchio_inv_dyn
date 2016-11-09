@@ -88,7 +88,7 @@ class AbstractSolver (object):
         self.iter       = 0;
         self.qpOasesSolver  = SQProblem(self.n,m_in); #, HessianType.POSDEF SEMIDEF
         self.options             = Options();
-        self.options.setToReliable();
+#        self.options.setToReliable();
         if(self.verb<=0):
             self.options.printLevel  = PrintLevel.NONE;
         elif(self.verb==1):
@@ -98,7 +98,7 @@ class AbstractSolver (object):
         elif(self.verb>2):            
             self.options.printLevel  = PrintLevel.DEBUG_ITER;
             print "set high print level"
-#        self.options.enableRegularisation = False;
+        self.options.enableRegularisation = True;
 #        self.options.enableFlippingBounds = BooleanType.FALSE
 #        self.options.initialStatusBounds  = SubjectToStatus.INACTIVE
 #        self.options.setToMPC();
@@ -172,12 +172,7 @@ class AbstractSolver (object):
             if(self.verb>0 and imode!=0 and imode!=9): #do not print error msg if iteration limit exceeded
                 print "[%s] *** ERROR *** %s" % (self.name,smode);
         elif(self.solver=='qpoases'):
-#            ubA                 = np.array(self.m_in*[1e9]);
-#            lb                  = np.array([ b[0] for b in self.bounds]);
-#            ub                  = np.array([ b[1] for b in self.bounds]);
-#            A                   = self.get_linear_inequality_matrix();
             self.iter           = 0; #total iters of qpoases
-#            lbA                 = -self.get_linear_inequality_vector();
             Hess                = self.f_cost_hess(x);
             grad                = self.f_cost_grad(x);
             self.fx             = self.f_cost(x);
@@ -195,6 +190,8 @@ class AbstractSolver (object):
                     imode = self.qpOasesSolver.init(Hess, grad, self.A, self.lb, self.ub, self.lbA, self.ubA, maxActiveSetIter, maxComputationTime);
                     if(imode==0):
                         self.initialized = True;
+                if(imode!=0):
+                    self.initialized = False;
 
             self.qpTime += maxComputationTime;
             self.iter               = 1+maxActiveSetIter[0];
