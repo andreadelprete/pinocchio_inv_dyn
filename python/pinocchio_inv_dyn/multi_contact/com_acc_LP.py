@@ -13,7 +13,7 @@ from math import sqrt, atan, pi
 import warnings
 
 
-EPS = 1e-3; #5
+EPS = 1e-5;
 INITIAL_HESSIAN_REGULARIZATION = 1e-8;
 MAX_HESSIAN_REGULARIZATION = 1e-4;
 
