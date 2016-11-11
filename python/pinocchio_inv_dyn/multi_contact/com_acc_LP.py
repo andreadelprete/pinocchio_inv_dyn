@@ -16,6 +16,7 @@ import warnings
 EPS = 1e-5;
 INITIAL_HESSIAN_REGULARIZATION = 1e-8;
 MAX_HESSIAN_REGULARIZATION = 1e-4;
+FORCE_GENERATOR_COEFFICIENT_UPPER_BOUND = 1e30;
 
 class ComAccLP (object):
     """
@@ -138,7 +139,7 @@ class ComAccLP (object):
             self.constrMat[3:,-1] = self.mass*np.cross(self.c0, self.v);
             self.lb = np.zeros(self.n);
             self.lb[-1] = -1e100;
-            self.ub = np.array(self.n*[1e100,]);
+            self.ub = np.ones(self.n)*FORCE_GENERATOR_COEFFICIENT_UPPER_BOUND;
             self.x  = np.zeros(self.n);
             self.y  = np.zeros(self.n+self.m_in);
             self.Hess = INITIAL_HESSIAN_REGULARIZATION*np.identity(self.n);
@@ -175,6 +176,10 @@ class ComAccLP (object):
         self.k2 = np.zeros(n_as+6);
         self.K[:n_as,:] = np.identity(self.n)[act_set,:];
         self.K[-6:,:] = self.constrMat;
+        act_ub = np.where(self.x[act_set]==self.ub[act_set])[0];
+        if(self.verb>-1 and act_ub.shape[0]>0):
+            print "[%s] INFO %d contact forces saturated upper bound"%(self.name, act_ub.shape[0]);
+        self.k2[act_ub] = FORCE_GENERATOR_COEFFICIENT_UPPER_BOUND; #self.ub[act_set[act_ub]];
         self.k1[-6:] = self.b;            
         self.k2[-6:] = self.d;
         U, s, VT = np.linalg.svd(self.K);
@@ -201,7 +206,7 @@ class ComAccLP (object):
                 act_set_vec[i] /= abs(act_set_mat[i]);
                 act_set_mat[i] /= abs(act_set_mat[i]);
         if (act_set_mat*self.alpha<act_set_vec-EPS).any():
-            raise ValueError("ERROR: after normalization current alpha violates constraints "+str(act_set_mat*self.alpha-act_set_vec));
+            raise ValueError("ERROR: after normalization current alpha violates constraints "+str(np.min(act_set_mat*self.alpha-act_set_vec)));
 
         ind_pos = np.where(act_set_mat>EPS)[0];
         if(ind_pos.shape[0]>0):
