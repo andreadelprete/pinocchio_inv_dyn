@@ -193,14 +193,24 @@ def compute_com_acceleration_polytope(com_pos, H, h, mass, g_vector, eliminate_r
         @param mass Mass of the system in Kg
         @param g_vector Gravity vector
         @return (A,b)
+        The com wrench to generate a com acceleration ddc is an affine function
+        of ddc:
+            w = K*ddc+d
     '''
     K = np.zeros((6,3));
     K[:3,:] = mass*np.identity(3);
     K[3:,:] = mass*crossMatrix(com_pos);
-    b = h - np.dot(H,np.dot(K,g_vector)); #constant term of F
+    b = h - np.dot(H, np.dot(K, g_vector)); #constant term of F
     A = np.dot(-H,K); #matrix multiplying com acceleration 
     if(eliminate_redundancies):
         (A,b) = eliminate_redundant_inequalities(A,b);
+        
+    # normalize inequalities
+    for i in range(A.shape[0]):
+        norm_Ai = norm(A[i,:])
+        if(norm_Ai>EPS):
+            A[i,:] /= norm_Ai;
+            b[i]   /= norm_Ai;
     return A,b;
     
 
