@@ -2,12 +2,16 @@
 
 #from tools import *
 import pinocchio as se3
-from pinocchio.utils import *
+from pinocchio.utils import zero as mat_zeros
+from pinocchio.utils import cross as mat_cross
 from pinocchio import SE3
 from pinocchio import Motion
 import numpy as np
+from numpy.linalg import norm
 import time
 from math import *
+
+EPS = 1e-5;
 
 def errorInSE3 (M, Mdes):
 	error = se3.log(Mdes.inverse () * M)
@@ -180,6 +184,67 @@ class CoMTask(Task):
   def jacobian(self, q, update_geometry = True):    
     self.__jacobian_value = self.robot.Jcom(q) # TODO - add update geometry option
     return self.__jacobian_value[self._mask,:] 
+
+
+''' CoM Task with acceleration scaling. 
+    This means that if the CoM desired acceleration is not feasible,
+    the solver will try to get as close as possible to the desired value,
+    while not altering too much the CoM acceleration direction.
+'''
+class CoMTaskWithAccelerationScaling(Task):
+
+  def __init__ (self, robot, ref_trajectory, weight, name = "CoM Task"):
+    assert ref_trajectory.dim == 3
+    Task.__init__ (self, robot, name)
+    self._ref_trajectory = ref_trajectory
+    # mask over the desired euclidian axis
+    self._mask = (np.ones(3)).astype(bool)
+    self.weight = weight
+
+  @property
+  def dim(self):
+    return self._mask.sum()
+
+  @property
+  def RefTrajectory(self):
+    return self._ref_trajectory
+
+  def mask(self, mask):
+    assert len(mask) == 3, "The mask must have 3 elements"
+    self._mask = mask.astype(bool)
+    
+  def dyn_value(self, t, q, v, update_geometry = False):
+    # Get the current CoM position, velocity and acceleration
+    p_com, v_com, a_com = self.robot.com(q,v,0*v)
+
+    # Get reference CoM trajectory
+    p_ref, v_ref, a_ref = self._ref_trajectory(t)
+
+    # Compute errors
+    p_error = p_com - p_ref
+    v_error = v_com - v_ref 
+
+    drift = a_com # Coriolis acceleration
+    a_des = -(self.kp * p_error + self.kv * v_error) + a_ref
+
+    # Compute jacobian
+    J = self.robot.Jcom(q)
+
+    D = mat_zeros((3,3));
+    D[:,0] = a_des / norm(a_des);
+    # compute 2 directions orthogonal to D[0,:] and orthogonal to each other
+    D[:,1] = mat_cross(D[:,0], np.matrix([0.0, 0.0, 1.0]).T);
+    if(norm(D[1,:])<EPS):
+      D[:,1] = mat_cross(D[:,0], np.matrix([0.0, 1.0, 0.0]).T);
+    D[:,1] *= self.weight/norm(D[:,1]);
+    D[:,2] = mat_cross(D[:,0], D[:,1]);
+    D[:,2] *= self.weight;
+
+    J     = D.T*J;
+    drift = D.T*drift;
+    a_des = D.T*a_des;
+
+    return J[self._mask,:], drift[self._mask], a_des[self._mask]
 
 
 ''' Define Postural Task considering only the joints (and not the floating base). '''
