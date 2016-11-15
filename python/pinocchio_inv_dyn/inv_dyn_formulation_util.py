@@ -26,6 +26,7 @@ class InvDynFormulation (object):
     USE_JOINT_VELOCITY_ESTIMATOR = False;
     BASE_VEL_FILTER_CUT_FREQ = 5;
     JOINT_VEL_ESTIMATOR_DELAY = 0.02;
+    COMPUTE_SUPPORT_POLYGON = True;
     
     ACCOUNT_FOR_ROTOR_INERTIAS = True;
     
@@ -296,20 +297,20 @@ class InvDynFormulation (object):
         self.contact_normals = zeros((3,ncp));
         mu_s = zeros(ncp);
         
-        if(ncp==0):
+        i = 0;
+        for (constr, P, N, mu) in zip(self.rigidContactConstraints, self.rigidContactConstraints_p, 
+                                      self.rigidContactConstraints_N, self.rigidContactConstraints_mu):
+            oMi = self.r.framePosition(constr._frame_id);
+            for j in range(P.shape[1]):
+                self.contact_points[:,i]  = oMi.act(P[:,j]);
+                self.contact_normals[:,i] = oMi.rotation * N[:,j];
+                mu_s[i,0] = mu[0];
+                i += 1;
+                
+        if(ncp==0 or not self.COMPUTE_SUPPORT_POLYGON):
             self.B_sp = zeros((0,2));
             self.b_sp = zeros(0);
         else:
-            i = 0;
-            for (constr, P, N, mu) in zip(self.rigidContactConstraints, self.rigidContactConstraints_p, 
-                                          self.rigidContactConstraints_N, self.rigidContactConstraints_mu):
-                oMi = self.r.framePosition(constr._frame_id);
-                for j in range(P.shape[1]):
-                    self.contact_points[:,i]  = oMi.act(P[:,j]);
-                    self.contact_normals[:,i] = oMi.rotation * N[:,j];
-                    mu_s[i,0] = mu[0];
-                    i += 1;
-            
             avg_z = np.mean(self.contact_points[2,:]);
             if(np.max(np.abs(self.contact_points[2,:] - avg_z)) < 1e-3):
                 ''' Contact points are coplanar so I can simply compute the convex hull of 
@@ -330,6 +331,7 @@ class InvDynFormulation (object):
 #            self.plotSupportPolygon();
             self.B_sp = np.matrix(self.B_sp);
             self.b_sp = np.matrix(self.b_sp).T;
+
         self.support_polygon_computed = True;
             
     ''' Get the matrix B and vector b representing the 2d support polygon as B*x+b>=0 '''
