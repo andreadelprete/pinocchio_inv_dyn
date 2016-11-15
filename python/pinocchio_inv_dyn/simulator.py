@@ -730,10 +730,11 @@ class Simulator (object):
                 self.viewer.updateObjectConfig('com', (com[0], com[1], com[2], 0.,0.,0.,1.));
     
     def updateCapturePointPositionInViewer(self, cp):
-        assert cp.shape[0]==2, "capture point should be a 2x1 matrix"
+        assert np.asarray(cp).squeeze().shape[0]==2, "capture point should be a 2d vector"
+        cp = np.asarray(cp).squeeze();
         if(self.time_step%int(self.VIEWER_DT/self.dt)==0):
             if(self.DISPLAY_CAPTURE_POINT):
-                self.viewer.updateObjectConfig('cp', (cp[0,0], cp[1,0], 0., 0.,0.,0.,1.));
+                self.viewer.updateObjectConfig('cp', (cp[0], cp[1], 0., 0.,0.,0.,1.));
                             
     
 
