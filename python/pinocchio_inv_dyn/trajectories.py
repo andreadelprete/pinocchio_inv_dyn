@@ -4,6 +4,7 @@ from numpy.polynomial.polynomial import polyval
 #from  numpy import polyder
 from  numpy.linalg import pinv
 from pinocchio import SE3, log3, exp3, Motion
+from pinocchio.utils import zero as mat_zeros
 from derivative_filters import computeSecondOrderPolynomialFitting
 import copy
 
@@ -27,6 +28,9 @@ class RefTrajectory (object):
   def dim(self):
     return self._dim
 
+  def has_trajectory_ended(self, t):
+    return True;
+
   def __call__ (self, t):
     return np.matrix ([]).reshape (0, 0)
     
@@ -41,6 +45,9 @@ class ConstantSE3Trajectory (object):
   @property
   def dim(self):
     return self._dim
+
+  def has_trajectory_ended(self, t):
+    return True;
     
   def setReference(self, Mref):
     self._Mref = Mref;
@@ -61,6 +68,9 @@ class ConstantNdTrajectory (object):
   @property
   def dim(self):
     return self._dim
+
+  def has_trajectory_ended(self, t):
+    return True;
     
   def setReference(self, x_ref):
     assert x_ref.shape[0]==self._x_ref.shape[0]
@@ -79,19 +89,23 @@ class SmoothedNdTrajectory (object):
       @param dt The time step duration in seconds
       @param window_length An odd positive integer representing the size of the window used for the polynomial fitting
   '''
-  def __init__ (self, name, x_ref, dt, window_length):
+  def __init__ (self, name, x_ref, dt, window_length, t_init=0.0):
     self._name = name
     self._dim = x_ref.shape[0]
     self._dt  = dt;
     (self._x_ref, self._v_ref, self._a_ref) = computeSecondOrderPolynomialFitting(x_ref, dt, window_length);
+    self._T = self._x_ref.shape[1]*dt;
 
   @property
   def dim(self):
     return self._dim
+    
+  def has_trajectory_ended(self, t):
+    return (t-self._t_init >= self._T);
 
   def __call__ (self, t):
-    assert t>=0.0, "Time must be non-negative"
-    i = int(t/self._dt);
+    assert (t-self._t_init)>=0.0, "Time must be non-negative"
+    i = int((t-self._t_init)/self._dt);
     if(i>=self._x_ref.shape[1]):
        raise ValueError("Specified time exceeds the duration of the trajectory: "+str(t));
     return (self._x_ref[:,i], self._v_ref[:,i], self._a_ref[:,i]);
@@ -106,21 +120,26 @@ class SmoothedSE3Trajectory (object):
       @param dt The time step duration in seconds
       @param window_length An odd positive integer representing the size of the window used for the polynomial fitting
   '''
-  def __init__ (self, name, M_ref, dt, window_length):
+  def __init__ (self, name, M_ref, dt, window_length, t_init=0.0):
     self._name = name;
     self._dim = 6;
     self._dt  = dt;
     self._M_ref = M_ref;
+    self._t_init = t_init;
     x_ref = np.hstack([M.translation for M in M_ref]);
     (self._x_ref, self._v_ref, self._a_ref) = computeSecondOrderPolynomialFitting(x_ref, dt, window_length);
+    self._T = self._x_ref.shape[1]*dt;
 
   @property
   def dim(self):
     return self._dim
+    
+  def has_trajectory_ended(self, t):
+    return (t-self._t_init >= self._T);
 
   def __call__ (self, t):
-    assert t>=0.0, "Time must be non-negative"
-    i = int(t/self._dt);
+    assert (t-self._t_init)>=0.0, "Time must be non-negative"
+    i = int((t-self._t_init)/self._dt);
     if(i>=self._x_ref.shape[1]):
        raise ValueError("Specified time exceeds the duration of the trajectory: "+str(t));
     M = self._M_ref[i];
@@ -130,6 +149,75 @@ class SmoothedSE3Trajectory (object):
     v.linear = self._v_ref[:,i];
     a.linear = self._a_ref[:,i];
     return (M, v, a);
+
+''' A minimum-jerk SE3 trajectory. 
+''' 
+class MinJerkSE3Trajectory (object):
+
+  ''' Constructor.
+      @param M_init A pinocchio.SE3 object
+      @param M_final A pinocchio.SE3 object
+      @param dt The time step duration in seconds
+      @param T The duration of the trajectory
+      @param t_init Initial time of the trajectory
+  '''
+  def __init__ (self, name, M_init, M_final, dt, T, t_init=0.0):
+    self._name = name;
+    self._dim = 6;
+    self._dt  = dt;
+    self._T = T;
+    self._M_init = M_init;
+    self._M_final = M_final;
+    self._t_init = t_init;
+    self._update_references();
+
+  def _update_references(self):
+    t = 0.0;
+    N = int(self._T/self._dt);
+    self._x_ref = mat_zeros((3,N));
+    self._v_ref = mat_zeros((3,N));
+    self._a_ref = mat_zeros((3,N));
+    x_err = self._M_final.translation - self._M_init.translation;
+    for i in range(N):
+        td  = t/self._T;
+        td2 = td**2;
+        td3 = td2*td;
+        td4 = td3*td;
+        td5 = td4*td;
+        p   = 10*td3 - 15*td4 + 6*td5;
+        dp  = (30*td2 - 60*td3 + 30*td4)/self._T;
+        ddp = (60*td - 180*td2 + 120*td3)/self._T**2;     
+        self._x_ref[:,i] = self._M_init.translation + x_err*p;
+        self._v_ref[:,i] = x_err*dp;
+        self._a_ref[:,i] = x_err*ddp;
+        t += self._dt;
+        
+  def setReference(self, M_final):
+      self._M_final = M_final;
+      self._update_references();
+
+  @property
+  def dim(self):
+    return self._dim
+    
+  def has_trajectory_ended(self, t):
+      return (t-self._t_init >= self._T);
+
+  def __call__ (self, t):
+    assert (t-self._t_init)>=0.0, "Time must be greater than or equal to t_init"
+    i = int((t-self._t_init)/self._dt);
+    if(i>=self._x_ref.shape[1]):
+        i = self._x_ref.shape[1] - 1;
+#       raise ValueError("Specified time exceeds the duration of the trajectory: "+str(t));
+    
+    M = self._M_final;
+    v = Motion.Zero();
+    a = Motion.Zero();
+    M.translation = self._x_ref[:,i];
+    v.linear = self._v_ref[:,i];
+    a.linear = self._a_ref[:,i];
+    return (M, v, a);
+
 
 class DifferentiableEuclidianTrajectory(RefTrajectory):
 
