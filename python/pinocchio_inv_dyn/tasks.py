@@ -155,7 +155,7 @@ class CoMTask(Task):
     return self._mask.sum()
 
   @property
-  def RefTrajectory(self):
+  def refTrajectory(self):
     return self._ref_trajectory
 
   def mask(self, mask):
@@ -206,7 +206,7 @@ class CoMTaskWithAccelerationScaling(Task):
     return self._mask.sum()
 
   @property
-  def RefTrajectory(self):
+  def refTrajectory(self):
     return self._ref_trajectory
 
   def mask(self, mask):
