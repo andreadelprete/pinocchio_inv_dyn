@@ -403,31 +403,32 @@ def test(N_CONTACTS = 2, verb=0):
         if(imode2!=0):
             print "LP failed!";
         
+        print "ddAlpha = %.3f, par_ddc_par_c = %.3f" % (ddAlpha, np.dot(v,np.dot(par_ddc_par_c,v)));
+        print "par_ddc_par_c\n", par_ddc_par_c
+        print "v", v
+        print "par_ddc_par_alpha", np.dot(par_ddc_par_c, v);
+        
         # check whether computed com acceleration is feasible according to GIWC
         error = False;
         acc_ineq = np.dot(A, ddc)-b;
         if(acc_ineq>EPS).any():
             print "\n*** ERROR: acceleration computed by ComAccLP3d is not feasible:", np.max(acc_ineq), "\n";
             error = True;
+        
+        if(norm(ddc)>EPS):
+            angle = 180.0*(np.arccos(np.dot(v,ddc)/norm(ddc)) - np.pi)/np.pi;
+        else:
+            angle = 0.0;
             
         # check whether deceleration computed by 1d LP is bigger (which should not be possible)
         if(np.dot(v, ddc) < ddAlpha - 1e-3):
-            if(norm(ddc)>EPS):
-                angle = 180.0*(np.arccos(np.dot(v,ddc)/norm(ddc)) - np.pi)/np.pi;
-            else:
-                angle = 0.0;
-            print "\n*** WARNING: v*ddc<ddAlpha: %.2f %.2f, angle dc-ddc=%.2f deg"%(np.dot(v, ddc), ddAlpha, angle);
-        elif(abs(np.dot(v, ddc) - ddAlpha) < EPS):
-            pass;
-#            print "\n*** GOOD! v*ddc=ddAlpha:", np.dot(v, ddc), ddAlpha, "\n";
-        else:
-            print "  INFO: ddAlpha=%.2f, v*ddc=%.2f"%(ddAlpha, np.dot(v,ddc));
+            print "\n*** INFO: v*ddc<ddAlpha: %.2f %.2f, angle dc-ddc=%.2f deg"%(np.dot(v, ddc), ddAlpha, angle);
+        elif(abs(np.dot(v, ddc) - ddAlpha) > 1e-3):
+            print "\n*** INFO: ddAlpha=%.2f, v*ddc=%.2f, angle dc-ddc=%.2f deg"%(ddAlpha, np.dot(v,ddc), angle);
 
         # check angle between com acc and com vel
-        if(norm(ddc)>EPS):
-            angle = 180.0*(np.arccos(np.dot(v,ddc)/norm(ddc)) - np.pi)/np.pi;
-            if abs(angle)>1.0:
-                print "    angle between dc and ddc: %.2f" % angle, v, ddc/norm(ddc)
+        if abs(angle)>1.0:
+            print "\n*** Angle between dc and ddc: %.2f deg." % angle, v, ddc/norm(ddc)
             
         if(error):
             f = comAccLP3d.getContactForces();
@@ -455,7 +456,7 @@ if __name__=="__main__":
     import cProfile
     N_CONTACTS = 2;
     VERB = 1;
-    N_TESTS = range(0,10);
+    N_TESTS = range(0,1);
     
     for i in N_TESTS:
         try:
