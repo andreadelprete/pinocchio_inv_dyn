@@ -259,7 +259,7 @@ class ComAccLP (object):
             self.Hess *= 10.0;
             maxActiveSetIter    = np.array([maxIter]);
             maxComputationTime  = np.array(maxTime);
-            if(self.verb>-1):
+            if(self.verb>0):
                 print "[%s] WARNING %s. Increasing Hessian regularization to %f"%(self.name, qpOasesSolverMsg(self.imode), self.Hess[0,0]);
             
         self.qpTime = maxComputationTime;
