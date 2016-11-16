@@ -158,13 +158,8 @@ class ComAccLP (object):
         self.g = np.asarray(g).squeeze().copy();
         self.set_contacts(contact_points, contact_normals, mu, regularization);
         self.set_com_state(c0, v);
-        
 
-    def compute_max_deceleration_derivative(self):
-        ''' Compute the derivative of the max CoM deceleration (i.e. the solution of the last LP)
-            with respect to the parameter alpha (i.e. the CoM position parameter). Moreover, 
-            it also computes the bounds within which this derivative is valid (alpha_min, alpha_max).
-        '''
+    def compute_x_kkt(self):
         act_set = np.where(self.y[:self.n-1]!=0.0)[0];    # indexes of active bound constraints
         n_as = act_set.shape[0];
         if(n_as > self.n-6):
@@ -183,24 +178,34 @@ class ComAccLP (object):
         self.k1[-6:] = self.b;            
         self.k2[-6:] = self.d;
         U, s, VT = np.linalg.svd(self.K);
-        rank = (s > EPS).sum();
-        K_inv_k1 = np.dot(VT[:rank,:].T, (1.0/s[:rank])*np.dot(U[:,:rank].T, self.k1));
-        K_inv_k2 = np.dot(VT[:rank,:].T, (1.0/s[:rank])*np.dot(U[:,:rank].T, self.k2));
+        rank = int((s > EPS).sum());
+        self.K_inv_k1 = np.dot(VT[:rank,:].T, (1.0/s[:rank])*np.dot(U[:,:rank].T, self.k1));
+        self.K_inv_k2 = np.dot(VT[:rank,:].T, (1.0/s[:rank])*np.dot(U[:,:rank].T, self.k2));
         if(rank<self.n):
             Z = VT[rank:,:].T;
             P = np.dot(np.dot(Z, np.linalg.inv(np.dot(Z.T, np.dot(self.Hess, Z)))), Z.T);
-            K_inv_k1 -= np.dot(P, np.dot(self.Hess, K_inv_k1));
-            K_inv_k2 -= np.dot(P, np.dot(self.Hess, K_inv_k2) + self.grad);
+            self.K_inv_k1 -= np.dot(P, np.dot(self.Hess, self.K_inv_k1));
+            self.K_inv_k2 -= np.dot(P, np.dot(self.Hess, self.K_inv_k2) + self.grad);
             
         # Check that the solution you get by solving the KKT is the same found by the solver
-        x_kkt = K_inv_k1*self.alpha + K_inv_k2;
-        if(norm(self.x - x_kkt) > 10*EPS):
-            warnings.warn("[%s] ERROR x different from x_kkt. |x-x_kkt|=%f" % (self.name, norm(self.x - x_kkt)));
+        x_kkt = self.K_inv_k1*self.alpha + self.K_inv_k2;
+        return x_kkt;
+
+    def compute_max_deceleration_derivative(self):
+        ''' Compute the derivative of the max CoM deceleration (i.e. the solution of the last LP)
+            with respect to the parameter alpha (i.e. the CoM position parameter). Moreover, 
+            it also computes the bounds within which this derivative is valid (alpha_min, alpha_max).
+        '''
+#        x_kkt = self.compute_x_kkt();
+#        if(norm(self.x - x_kkt) > 10*EPS):
+#            warnings.warn("[%s] ERROR x different from x_kkt. |x-x_kkt|=%f" % (self.name, norm(self.x - x_kkt))+ 
+#                            ", x="+str(self.x)+", y="+str(self.y)+", active constraints="+str(np.where(self.y[:self.n-1]!=0.0)[0].shape[0])+
+#                            ", expected active constraints="+str(self.n-6));
         # store the derivative of the solution w.r.t. the parameter alpha
-        dx = K_inv_k1[-1];
+        dx = self.K_inv_k1[-1];
         # act_set_mat * alpha >= act_set_vec
-        act_set_mat = K_inv_k1[:-1];
-        act_set_vec = -K_inv_k2[:-1];
+        act_set_mat = self.K_inv_k1[:-1];
+        act_set_vec = -self.K_inv_k2[:-1];
         for i in range(act_set_mat.shape[0]):
             if(abs(act_set_mat[i])>EPS):
                 act_set_vec[i] /= abs(act_set_mat[i]);
@@ -249,12 +254,21 @@ class ComAccLP (object):
                 self.imode = self.qpOasesSolver.hotstart(self.grad, self.lb, self.ub, self.constrLB, 
                                                          self.constrUB, maxActiveSetIter, maxComputationTime);
             if(self.imode==0):
-                self.initialized = True;
-            if(self.imode==0 or 
-               self.imode==PyReturnValue.INIT_FAILED_INFEASIBILITY or 
+                self.qpOasesSolver.getPrimalSolution(self.x);
+                self.qpOasesSolver.getDualSolution(self.y);
+                x_kkt = self.compute_x_kkt();
+                if(norm(self.x - x_kkt) < 10*EPS):
+                    self.initialized = True;
+                    break;
+#                warnings.warn("[%s] ERROR x different from x_kkt. |x-x_kkt|=%f" % (self.name, norm(self.x - x_kkt))+ 
+#                              ", x="+str(self.x)+", y="+str(self.y)+", active constraints="+str(np.where(self.y[:self.n-1]!=0.0)[0].shape[0])+
+#                                ", expected active constraints="+str(self.n-6));
+                    
+            if(self.imode==PyReturnValue.INIT_FAILED_INFEASIBILITY or 
                self.imode==PyReturnValue.HOTSTART_STOPPED_INFEASIBILITY or
                self.Hess[0,0]>=MAX_HESSIAN_REGULARIZATION):
                 break;
+                
             self.initialized = False;
             self.Hess *= 10.0;
             maxActiveSetIter    = np.array([maxIter]);
@@ -265,9 +279,6 @@ class ComAccLP (object):
         self.qpTime = maxComputationTime;
         self.iter   = 1+maxActiveSetIter[0];
         if(self.imode==0):
-            self.qpOasesSolver.getPrimalSolution(self.x);
-            self.qpOasesSolver.getDualSolution(self.y);
-
             if((self.x<self.lb-self.INEQ_VIOLATION_THR).any()):
                 self.initialized = False;
                 raise ValueError("[%s] ERROR lower bound violated" % (self.name)+str(self.x)+str(self.lb));
