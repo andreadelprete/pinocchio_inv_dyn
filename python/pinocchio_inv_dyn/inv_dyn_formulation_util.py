@@ -411,6 +411,7 @@ class InvDynFormulation (object):
         self.x_com    = self.r.com(q, update_kinematics=False);
         self.J_com    = self.r.Jcom(q, update_kinematics=False);
         self.M        = self.r.mass(q, update_kinematics=False);
+        self.Ag       = self.r.momentumJacobian(q, v);
         if(self.ACCOUNT_FOR_ROTOR_INERTIAS):
             if(self.freeFlyer):
                 self.M[6:,6:]   += self.Md;
@@ -485,8 +486,9 @@ class InvDynFormulation (object):
     
     ''' ********** GET ROBOT STATE ********** '''        
     def getAngularMomentum(self):
-        I = self.M[3:6,3:6];
-        return np.dot(np.linalg.inv(I), np.dot(self.M[3:6,:], self.v));
+        return (self.Ag * self.v)[3:,0];
+#        I = self.M[3:6,3:6];
+#        return np.dot(np.linalg.inv(I), np.dot(self.M[3:6,:], self.v));
         
     def getZmp(self, f_l, f_r):
         return zeros(2);
