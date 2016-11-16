@@ -384,14 +384,15 @@ class AngularMomentumTask(Task):
 #    b_com = cXi.actInv(b[:6,0]).vector
     b_com = b_com.angular;
 
-    M_com = cXi.inverse().action.T * M[:6,:]
+#    M_com = cXi.inverse().action.T * M[:6,:]
 #    M_com = cXi.inverse().np.T * M[:6,:]
+    M_com = self.robot.momentumJacobian(q, v, update_geometry);
     M_com = M_com[3:,:]
     L = M_com * v
 
     L_ref, dL_ref, ddL_ref = self._ref_traj(t)
 #    acc = dL_ref - b_com[3:,:]
-    dL_des = dL_ref + self.kp * (L - L_ref)
+    dL_des = dL_ref - self.kp * (L - L_ref)
     
     return M_com[self._mask,:], b_com[self._mask,:], dL_des[self._mask,0]
 #    return self._coeff * L_error[self._mask], 0., self._coeff * acc[self._mask,0]

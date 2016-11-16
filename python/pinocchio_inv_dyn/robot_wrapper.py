@@ -39,6 +39,11 @@ class RobotWrapper(PinocchioRobotWrapper):
         if(update_kinematics):
             return se3.jacobianCenterOfMass(self.model, self.data, q)
         return self.data.Jcom
+        
+    def momentumJacobian(self, q, v, update=True):
+        if(update):
+            se3.ccrba(self.model, self.data, q, v);
+        return self.data.Ag;
 
 
     def computeAllTerms(self, q, v):
