@@ -4,6 +4,7 @@ from qpoases import PyQProblem as SQProblem
 from qpoases import PyOptions as Options
 from qpoases import PyPrintLevel as PrintLevel
 from qpoases import PyReturnValue
+from qpoases import PySolutionAnalysis as SolutionAnalysis
 from pinocchio_inv_dyn.sot_utils import crossMatrix, qpOasesSolverMsg
 from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, compute_centroidal_cone_generators
 import pinocchio_inv_dyn.plot_utils as plut
@@ -98,6 +99,7 @@ class ComAccLP (object):
             self.options.printLevel  = PrintLevel.DEBUG_ITER;
         self.options.enableRegularisation = False;
         self.options.enableEqualities = True;
+        self.analyser = SolutionAnalysis();
 #        self.qpOasesSolver.printOptions()
         self.b = np.zeros(6);
         self.d = np.empty(6);
@@ -181,13 +183,23 @@ class ComAccLP (object):
         rank = int((s > EPS).sum());
         self.K_inv_k1 = np.dot(VT[:rank,:].T, (1.0/s[:rank])*np.dot(U[:,:rank].T, self.k1));
         self.K_inv_k2 = np.dot(VT[:rank,:].T, (1.0/s[:rank])*np.dot(U[:,:rank].T, self.k2));
+        
         if(rank<self.n):
+            # solution is not at a vertex of the feasible polytope (this would never happen with an LP)
             Z = VT[rank:,:].T;
             P = np.dot(np.dot(Z, np.linalg.inv(np.dot(Z.T, np.dot(self.Hess, Z)))), Z.T);
             self.K_inv_k1 -= np.dot(P, np.dot(self.Hess, self.K_inv_k1));
             self.K_inv_k2 -= np.dot(P, np.dot(self.Hess, self.K_inv_k2) + self.grad);
+        
+        if(rank<self.K.shape[0]):
+            # active constraints are not linearly dependent, so infinite solutions to the KKT conditions exist
+            if(self.verb>-1):
+                print "*** [%s] INFO Active constraints are not linearly dependent (rank %d out of %d)"%(self.name,rank,self.K.shape[0])
+            x_kkt = self.K_inv_k1*self.alpha + self.K_inv_k2;
+            # make sure that you get the same solution found by the solver by solving the KKT conditions
+            self.K_inv_k2 += self.x-x_kkt;
             
-        # Check that the solution you get by solving the KKT is the same found by the solver
+        # compute the solution by solving the KKT conditions
         x_kkt = self.K_inv_k1*self.alpha + self.K_inv_k2;
         return x_kkt;
 
@@ -196,16 +208,15 @@ class ComAccLP (object):
             with respect to the parameter alpha (i.e. the CoM position parameter). Moreover, 
             it also computes the bounds within which this derivative is valid (alpha_min, alpha_max).
         '''
-#        x_kkt = self.compute_x_kkt();
-#        if(norm(self.x - x_kkt) > 10*EPS):
-#            warnings.warn("[%s] ERROR x different from x_kkt. |x-x_kkt|=%f" % (self.name, norm(self.x - x_kkt))+ 
-#                            ", x="+str(self.x)+", y="+str(self.y)+", active constraints="+str(np.where(self.y[:self.n-1]!=0.0)[0].shape[0])+
-#                            ", expected active constraints="+str(self.n-6));
+
         # store the derivative of the solution w.r.t. the parameter alpha
         dx = self.K_inv_k1[-1];
         # act_set_mat * alpha >= act_set_vec
         act_set_mat = self.K_inv_k1[:-1];
         act_set_vec = -self.K_inv_k2[:-1];
+        if (act_set_mat*self.alpha<act_set_vec-EPS).any():
+            raise ValueError("ERROR: current alpha violates constraints "+str(np.min(act_set_mat*self.alpha-act_set_vec))+
+                             " min(x_kkt)="+str(np.min(self.K_inv_k1[:-1]*self.alpha+self.K_inv_k2[:-1])));
         for i in range(act_set_mat.shape[0]):
             if(abs(act_set_mat[i])>EPS):
                 act_set_vec[i] /= abs(act_set_mat[i]);
@@ -260,9 +271,12 @@ class ComAccLP (object):
                 if(norm(self.x - x_kkt) < 10*EPS):
                     self.initialized = True;
                     break;
-#                warnings.warn("[%s] ERROR x different from x_kkt. |x-x_kkt|=%f" % (self.name, norm(self.x - x_kkt))+ 
-#                              ", x="+str(self.x)+", y="+str(self.y)+", active constraints="+str(np.where(self.y[:self.n-1]!=0.0)[0].shape[0])+
-#                                ", expected active constraints="+str(self.n-6));
+                if(self.Hess[0,0]>=MAX_HESSIAN_REGULARIZATION):
+                    warnings.warn("[%s] ERROR x different from x_kkt. |x-x_kkt|=%f" % (self.name, norm(self.x - x_kkt))+ 
+                                  ", x="+str(self.x)+", y="+str(self.y)+", active constraints="+str(np.where(self.y[:self.n-1]!=0.0)[0].shape[0])+
+                                  ", expected active constraints="+str(self.n-6));
+                    if(self.verb>0):
+                        self._debug_kkt();
                     
             if(self.imode==PyReturnValue.INIT_FAILED_INFEASIBILITY or 
                self.imode==PyReturnValue.HOTSTART_STOPPED_INFEASIBILITY or
@@ -320,6 +334,48 @@ class ComAccLP (object):
                     
     def reset(self):
         self.initialized = False;
+        
+    def _debug_kkt(self):
+        maxStat = np.zeros(1); # maximum value of stationarity condition residual.
+        maxFeas = np.zeros(1); # maximum value of primal feasibility violation.
+        maxCmpl = np.zeros(1); # maximum value of complementarity residual. 
+        self.analyser.getKktViolation(self.qpOasesSolver, maxStat, maxFeas, maxCmpl);
+        print("maxStat: %e, maxFeas:%e, maxCmpl: %e\n"%(maxStat, maxFeas, maxCmpl));
+        
+        act_set = np.where(self.y!=0.0)[0];    # indexes of active bound constraints
+        kkt_viol = np.dot(self.Hess, self.x) + self.grad - np.dot(self.K.T, self.y[act_set]);
+        print "kkt_viol   =", norm(kkt_viol);
+        constr_viol = np.dot(self.K, self.x) - self.k1*self.alpha - self.k2;
+        print "constr_viol=", norm(constr_viol);
+
+        n_as = act_set.shape[0];
+        KKT = np.zeros((self.n+n_as, self.n+n_as));
+        KKT[:self.n, :self.n] = self.Hess;
+        KKT[:self.n, self.n:] = -self.K.T;
+        KKT[self.n:, :self.n] = self.K;
+        
+        k1_bar = np.zeros(self.n+n_as);
+        k1_bar[-n_as:] = self.k1;
+        k2_bar = np.zeros(self.n+n_as);
+        k2_bar[:self.n] = -self.grad;
+        k2_bar[self.n:] = self.k2;
+        
+        xy = np.zeros(self.n+n_as);
+        xy[:self.n] = self.x;
+        xy[self.n:] = self.y[act_set];
+        k = k1_bar*self.alpha + k2_bar;
+        print "KKT*xy-k=", norm(np.dot(KKT, xy) - k);
+
+        U, s, VT = np.linalg.svd(KKT);
+        rank = int((s > EPS).sum());                    
+        xy_kkt = np.dot(VT[:rank,:].T, (1.0/s[:rank])*np.dot(U[:,:rank].T, k));
+        print "rank(KKT)", rank, "dim", self.n+n_as
+        print "smallest sing val", s[-1]
+        print "|x-x_kkt|="+str(norm(self.x-xy_kkt[:self.n]));
+
+        U, s, VT = np.linalg.svd(self.K);
+        rank = int((s > EPS).sum());  
+        print "rank(K)=%d, dim=%d"%(rank, n_as);
     
 
 class ComAccPP(object):
