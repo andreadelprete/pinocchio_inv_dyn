@@ -352,11 +352,11 @@ class PosturalTask(Task):
 # Define Angular Momentum Task
 class AngularMomentumTask(Task):
 
-  def __init__ (self, robot, name = "Angular Momentum Task"):
+  def __init__ (self, robot, refTraj, name = "Angular Momentum Task"):
     Task.__init__ (self, robot, name)
-
+    self._ref_traj = refTraj;
     # mask over the desired euclidian axis
-    self._mask = (np.ones(robot.nv)).astype(bool)
+    self._mask = (np.ones(3)).astype(bool);
 
   @property
   def dim(self):
@@ -369,9 +369,9 @@ class AngularMomentumTask(Task):
   def setTrajectory(self, traj):
     self._ref_traj = traj
   
-  def error_dyn(self, t, q, v):
-    g = self.robot.biais(q,0*v)
-    b = self.robot.biais(q,v)
+  def dyn_value(self, t, q, v, update_geometry=False):
+    g = self.robot.bias(q,0*v)
+    b = self.robot.bias(q,v)
     b -= g;
     M = self.robot.mass(q)
 
@@ -380,58 +380,22 @@ class AngularMomentumTask(Task):
     oXi = self.robot.data.oMi[1]
     cXi.rotation = oXi.rotation
     cXi.translation = oXi.translation - com_p
-    b_com = cXi.inverse().np.T * b[:6,0]
-    b_angular = -b_com[3:,:]
+    b_com = cXi.actInv(se3.Force(b[:6,0]))
+#    b_com = cXi.actInv(b[:6,0]).vector
+    b_com = b_com.angular;
 
-    M_com = cXi.inverse().np.T * M[:6,:]
-    L = M_com[3:,:] * v
+    M_com = cXi.inverse().action.T * M[:6,:]
+#    M_com = cXi.inverse().np.T * M[:6,:]
+    M_com = M_com[3:,:]
+    L = M_com * v
 
-    L_des, Ldot_des = self._ref_traj(t)
-    L_error = L - L_des
-
-    acc = Ldot_des - b_com[3:,:]
+    L_ref, dL_ref, ddL_ref = self._ref_traj(t)
+#    acc = dL_ref - b_com[3:,:]
+    dL_des = dL_ref + self.kp * (L - L_ref)
     
-    # Compute error
-    #error_value = self.__error_value
-    #error_value[:6,0] = error_ff
-    #error_value[6:,0] = q[7:,0] - self.q_posture_des[7:,0]
-    
-    #print error_value
-    #diag = np.matrix(self.robot.data.M.diagonal()) 
-    #print diag
-    
-    #M = self.robot.data.M
-    #P = np.diag(np.diag(M.A)) 
-    #print P.shape 
-    #print error_value.shape 
-    #error_value_pond = np.matrix(P * error_value)
-    #print b_angular[self._mask,0]
-    #print L
-    #L -= 10.
-    #wXc  = SE3(eye(3),self.robot.position(q,1).inverse()*self.robot.com(q))
-    #Jang = wXc.action.T[3:,:]*self.robot.mass(q)[:6,:]
-    #b_com = wXc.action.T[3:,:]*b[:6]
-    #b_angular = -0*b_com
-    #bang = Jang*v
-    #return L[self._mask], 0., b_angular[self._mask,0]
-    return self._coeff * L_error[self._mask], 0., self._coeff * acc[self._mask,0]
-    #return bang[self._mask], 0., b_angular[self._mask,0]
+    return M_com[self._mask,:], b_com[self._mask,:], dL_des[self._mask,0]
+#    return self._coeff * L_error[self._mask], 0., self._coeff * acc[self._mask,0]
 
-
-  def jacobian(self, q):
-    self.robot.mass(q)
-    com_p = self.robot.com(q)
-    cXi= SE3.Identity()
-    oXi = self.robot.data.oMi[1]
-    cXi.rotation = oXi.rotation
-    cXi.translation = oXi.translation - com_p
-    M_ff = self.robot.data.M[:6,:]
-    M_com = cXi.inverse().np.T * M_ff
-    L_dot = M_com[3:,:]
-    wXc  = SE3(eye(3),self.robot.position(q,1).inverse()*self.robot.com(q))
-    Jang = wXc.action.T[3:,:]*self.robot.mass(q)[:6,:]
-    return self._coeff * L_dot[self._mask,:] 
-    #return Jang[self._mask,:] 
 
 class ConfigTask(Task):
 
