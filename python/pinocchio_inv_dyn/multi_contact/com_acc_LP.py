@@ -1,23 +1,17 @@
 import numpy as np
 from numpy.linalg import norm
-from qpoases import PyQProblem as SQProblem
-from qpoases import PyOptions as Options
-from qpoases import PyPrintLevel as PrintLevel
-from qpoases import PyReturnValue
-from qpoases import PySolutionAnalysis as SolutionAnalysis
-from pinocchio_inv_dyn.sot_utils import crossMatrix, qpOasesSolverMsg
+import pinocchio_inv_dyn.optimization.solver_LP_abstract as optim #import optim.getNewSolver, LP_status, LP_status_string
+from pinocchio_inv_dyn.sot_utils import crossMatrix
 from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, compute_centroidal_cone_generators
 import pinocchio_inv_dyn.plot_utils as plut
 import matplotlib.pyplot as plt
-import time
-from math import sqrt, atan, pi
 import warnings
 
 
 EPS = 1e-5;
 INITIAL_HESSIAN_REGULARIZATION = 1e-8;
 MAX_HESSIAN_REGULARIZATION = 1e-4;
-FORCE_GENERATOR_COEFFICIENT_UPPER_BOUND = 1e30;
+FORCE_GENERATOR_COEFFICIENT_UPPER_BOUND = 1e5;
 
 class ComAccLP (object):
     """
@@ -45,13 +39,10 @@ class ComAccLP (object):
     to alpha, and the boundaries of the alpha-region in which the derivative remains constant.
     """
     
-    NO_WARM_START = False;
-    
     name = "";  # solver name
     n = 0;      # number of variables
     m_in = 0;   # number of constraints (i.e. 6)
     
-    Hess = [];     # Hessian
     grad = [];     # gradient
     A = None;       # constraint matrix multiplying the contact force generators
     b = None;       # constraint vector multiplying the CoM position parameter alpha
@@ -59,54 +50,31 @@ class ComAccLP (object):
     
     mass = 0.0; # robot mass
     g = None;   # 3d gravity vector
-    
-    maxIter=0;  # max number of iterations
     verb=0;     # verbosity level of the solver (0=min, 2=max)
     
-    iter = 0;               # current iteration number
-    computationTime = 0.0;  # total computation time
-    qpTime = 0.0;           # time taken to solve the QP(s) only
+    solver = None;
     
-    initialized = False;    # true if solver has been initialized
-    qpOasesSolver = [];
-    options = [];           # qp oases solver's options
-    
-    epsilon = np.sqrt(np.finfo(float).eps);
-    INEQ_VIOLATION_THR = 1e-4;
-
-    def __init__ (self, name, c0, v, contact_points, contact_normals, mu, g, mass, maxIter=10000, verb=0, regularization=1e-5):
+    def __init__ (self, name, c0, v, contact_points, contact_normals, mu, g, mass, 
+                  maxIter=10000, verb=0, regularization=1e-5, solver='qpoases'):
         ''' Constructor
             @param c0 Initial CoM position
             @param v Opposite of the direction in which you want to maximize the CoM acceleration (typically that would be
                                                                                                    the CoM velocity direction)
             @param g Gravity vector
             @param regularization Weight of the force minimization, the higher this value, the sparser the solution
+            @param solver Specify which LP solver to use (qpoases, cvxopt or scipy)
         '''
         self.name       = name;
-        self.maxIter    = maxIter;
         self.verb       = verb;
         self.m_in       = 6;
-        self.initialized    = False;
-        self.options        = Options();
-        self.options.setToReliable();
-        if(self.verb<=1):
-            self.options.printLevel  = PrintLevel.NONE;
-        elif(self.verb==2):
-            self.options.printLevel  = PrintLevel.LOW;
-        elif(self.verb==3):
-            self.options.printLevel  = PrintLevel.MEDIUM;
-        elif(self.verb>3):
-            self.options.printLevel  = PrintLevel.DEBUG_ITER;
-        self.options.enableRegularisation = False;
-        self.options.enableEqualities = True;
-        self.analyser = SolutionAnalysis();
-#        self.qpOasesSolver.printOptions()
+        self.solver = optim.getNewSolver(solver, name, maxIter=maxIter, verb=verb);
+        self.hessian_regularization = INITIAL_HESSIAN_REGULARIZATION;
         self.b = np.zeros(6);
         self.d = np.empty(6);
         self.c0 = np.empty(3);
         self.v = np.empty(3);
         self.constrUB = np.zeros(self.m_in)+1e100;
-        self.constrLB = np.zeros(self.m_in)-1e100;
+#        self.constrLB = np.zeros(self.m_in)-1e100;
         self.set_problem_data(c0, v, contact_points, contact_normals, mu, g, mass, regularization);
 
 
@@ -124,7 +92,6 @@ class ComAccLP (object):
         self.b[3:] = self.mass*np.cross(self.v, self.g);
         self.d[:3] = self.mass*self.g;
         self.d[3:] = self.mass*np.cross(c0, self.g);
-        self.initialized    = False;
 
 
     def set_contacts(self, contact_points, contact_normals, mu, regularization=1e-5):
@@ -134,23 +101,19 @@ class ComAccLP (object):
         # since the size of the problem may have changed we need to recreate the solver and all the problem matrices/vectors
         if(self.n != contact_points.shape[0]*4 + 1):
             self.n              = contact_points.shape[0]*4 + 1;
-            self.qpOasesSolver  = SQProblem(self.n,self.m_in); #, HessianType.SEMIDEF);
-            self.qpOasesSolver.setOptions(self.options);
             self.constrMat = np.zeros((self.m_in,self.n));
             self.constrMat[:3,-1] = self.mass*self.v;
             self.constrMat[3:,-1] = self.mass*np.cross(self.c0, self.v);
             self.lb = np.zeros(self.n);
-            self.lb[-1] = -1e100;
+            self.lb[-1] = -1e3;
             self.ub = np.ones(self.n)*FORCE_GENERATOR_COEFFICIENT_UPPER_BOUND;
             self.x  = np.zeros(self.n);
             self.y  = np.zeros(self.n+self.m_in);
-            self.Hess = INITIAL_HESSIAN_REGULARIZATION*np.identity(self.n);
             self.grad = np.ones(self.n);
             self.grad[-1] = 1.0;
 
         self.grad[:-1] = regularization;
         self.constrMat[:,:-1] = self.A;
-        self.initialized    = False;
 
 
     def set_problem_data(self, c0, v, contact_points, contact_normals, mu, g, mass, regularization=1e-5):
@@ -187,9 +150,9 @@ class ComAccLP (object):
         if(rank<self.n):
             # solution is not at a vertex of the feasible polytope (this would never happen with an LP)
             Z = VT[rank:,:].T;
-            P = np.dot(np.dot(Z, np.linalg.inv(np.dot(Z.T, np.dot(self.Hess, Z)))), Z.T);
-            self.K_inv_k1 -= np.dot(P, np.dot(self.Hess, self.K_inv_k1));
-            self.K_inv_k2 -= np.dot(P, np.dot(self.Hess, self.K_inv_k2) + self.grad);
+            P = np.dot(np.dot(Z, np.linalg.inv(self.hessian_regularization*np.dot(Z.T, Z))), Z.T);
+            self.K_inv_k1 -= np.dot(P, self.hessian_regularization*self.K_inv_k1);
+            self.K_inv_k2 -= np.dot(P, self.hessian_regularization*self.K_inv_k2 + self.grad);
         
         if(rank<self.K.shape[0]):
             # active constraints are not linearly dependent, so infinite solutions to the KKT conditions exist
@@ -243,83 +206,46 @@ class ComAccLP (object):
         return (dx, alpha_min, alpha_max);
 
 
-    def compute_max_deceleration(self, alpha, maxIter=None, maxTime=100.0):
-        start = time.time();
+    def compute_max_deceleration(self, alpha):
         self.alpha = alpha;
-        if(self.NO_WARM_START):
-            self.qpOasesSolver  = SQProblem(self.n,self.m_in);
-            self.qpOasesSolver.setOptions(self.options);
-            self.initialized = False;            
-        if(maxIter==None):
-            maxIter = self.maxIter;        
-        maxActiveSetIter    = np.array([maxIter]);
-        maxComputationTime  = np.array(maxTime);
         self.constrUB[:6]   = np.dot(self.b, alpha) + self.d;
-        self.constrLB[:6]   = self.constrUB[:6];
+#        self.constrLB[:6]   = self.constrUB[:6];
 
         while(True):
-            if(not self.initialized):
-                self.imode = self.qpOasesSolver.init(self.Hess, self.grad, self.constrMat, self.lb, self.ub, self.constrLB, 
-                                                     self.constrUB, maxActiveSetIter, maxComputationTime);
-            else:
-                self.imode = self.qpOasesSolver.hotstart(self.grad, self.lb, self.ub, self.constrLB, 
-                                                         self.constrUB, maxActiveSetIter, maxComputationTime);
-            if(self.imode==0):
-                self.qpOasesSolver.getPrimalSolution(self.x);
-                self.qpOasesSolver.getDualSolution(self.y);
+            (status, self.x, self.y) = self.solver.solve(self.grad, self.lb, self.ub, 
+                                                         A_eq=self.constrMat, b=self.constrUB);
+            
+            if(status==optim.LP_status.OPTIMAL):
                 x_kkt = self.compute_x_kkt();
                 if(norm(self.x - x_kkt) < 10*EPS):
-                    self.initialized = True;
                     break;
-                if(self.Hess[0,0]>=MAX_HESSIAN_REGULARIZATION):
+                if(self.verb>1):
+                    print "[%s] INFO Solver succeeded but x!=x_kkt (%f)" % (self.name, norm(self.x-x_kkt));
+                if(self.hessian_regularization>=MAX_HESSIAN_REGULARIZATION):
                     warnings.warn("[%s] ERROR x different from x_kkt. |x-x_kkt|=%f" % (self.name, norm(self.x - x_kkt))+ 
                                   ", x="+str(self.x)+", y="+str(self.y)+", active constraints="+str(np.where(self.y[:self.n-1]!=0.0)[0].shape[0])+
                                   ", expected active constraints="+str(self.n-6));
                     if(self.verb>0):
                         self._debug_kkt();
                     
-            if(self.imode==PyReturnValue.INIT_FAILED_INFEASIBILITY or 
-               self.imode==PyReturnValue.HOTSTART_STOPPED_INFEASIBILITY or
-               self.Hess[0,0]>=MAX_HESSIAN_REGULARIZATION):
+            if(status==optim.LP_status.INFEASIBLE or self.hessian_regularization>=MAX_HESSIAN_REGULARIZATION):
                 break;
                 
-            self.initialized = False;
-            self.Hess *= 10.0;
-            maxActiveSetIter    = np.array([maxIter]);
-            maxComputationTime  = np.array(maxTime);
+            self.solver.reset();
+            self.hessian_regularization *= 10.0;
+            if(not self.solver.set_option('hessian_regularization', self.hessian_regularization)):
+                break;
             if(self.verb>0):
-                print "[%s] WARNING %s. Increasing Hessian regularization to %f"%(self.name, qpOasesSolverMsg(self.imode), self.Hess[0,0]);
+                print "[%s] WARNING %s. Increasing Hessian regularization to %f"%(self.name, optim.LP_status_string[status], self.hessian_regularization);
             
-        self.qpTime = maxComputationTime;
-        self.iter   = 1+maxActiveSetIter[0];
-        if(self.imode==0):
-            if((self.x<self.lb-self.INEQ_VIOLATION_THR).any()):
-                self.initialized = False;
-                raise ValueError("[%s] ERROR lower bound violated" % (self.name)+str(self.x)+str(self.lb));
-            if((self.x>self.ub+self.INEQ_VIOLATION_THR).any()):
-                self.initialized = False;
-                raise ValueError("[%s] ERROR upper bound violated" % (self.name)+str(self.x)+str(self.ub));
-            if((np.dot(self.constrMat,self.x)>self.constrUB+self.INEQ_VIOLATION_THR).any()):
-                self.initialized = False;
-                raise ValueError("[%s] ERROR constraint upper bound violated " % (self.name)+str(np.min(np.dot(self.constrMat,self.x)-self.constrUB)));
-            if((np.dot(self.constrMat,self.x)<self.constrLB-self.INEQ_VIOLATION_THR).any()):
-                self.initialized = False;
-                raise ValueError("[%s] ERROR constraint lower bound violated " % (self.name)+str(np.max(np.dot(self.constrMat,self.x)-self.constrLB)));
-        
+        if(status==optim.LP_status.OPTIMAL):
             (dx, alpha_min, alpha_max) = self.compute_max_deceleration_derivative();
         else:
             self.initialized = False;
             dx=0.0;
             alpha_min=0.0;
             alpha_max=0.0;
-            if(self.verb>0):
-                print "[%s] ERROR Qp oases %s" % (self.name, qpOasesSolverMsg(self.imode));
-        if(self.qpTime>=maxTime):
-            if(self.verb>0):
-                print "[%s] Max time reached %f after %d iters" % (self.name, self.qpTime, self.iter);
-            self.imode = 9;
-        self.computationTime        = time.time()-start;
-        return (self.imode, self.x[-1], dx, alpha_min, alpha_max);
+        return (status, self.x[-1], dx, alpha_min, alpha_max);
 
 
     def getContactForces(self):
@@ -334,6 +260,9 @@ class ComAccLP (object):
                     
     def reset(self):
         self.initialized = False;
+        
+    def getLpTime(self):
+        return self.solver.getLpTime();
         
     def _debug_kkt(self):
         maxStat = np.zeros(1); # maximum value of stationarity condition residual.
@@ -376,10 +305,6 @@ class ComAccLP (object):
         U, s, VT = np.linalg.svd(self.K);
         rank = int((s > EPS).sum());  
         print "rank(K)=%d, dim=%d"%(rank, n_as);
-
-    def is_infeasible(self, imode):
-        return (imode==PyReturnValue.INIT_FAILED_INFEASIBILITY or 
-                imode==PyReturnValue.HOTSTART_STOPPED_INFEASIBILITY);
     
 
 class ComAccPP(object):
@@ -451,7 +376,8 @@ class ComAccPP(object):
         plt.show();
         
         
-def test(N_CONTACTS = 2, verb=0):    
+def test(N_CONTACTS = 2, verb=0, solver='qpoases'):
+    from math import atan, pi
     np.set_printoptions(precision=2, suppress=True, linewidth=250);
     DO_PLOTS = False;
     PLOT_3D = False;
@@ -519,16 +445,16 @@ def test(N_CONTACTS = 2, verb=0):
             ax.scatter(c0[0]+s*dc0[0],c0[1]+s*dc0[1],c0[2]+s*dc0[2], c='k', marker='x');
         ax.set_xlabel('x'); ax.set_ylabel('y'); ax.set_zlabel('z');
         
-    comAccLP = ComAccLP("comAccLP", c0, dc0, p, N, mu, g_vector, mass, verb=verb, regularization=1e-5);
+    comAccLP = ComAccLP("comAccLP", c0, dc0, p, N, mu, g_vector, mass, verb=verb, regularization=1e-5, solver=solver);
 #    comAccLP2 = ComAccLP("comAccLP2", c0, dc0, p, N, mu, g_vector, mass, verb=verb, regularization=1e-5);
     comAccPP = ComAccPP("comAccPP", c0, dc0, p, N, mu, g_vector, mass, verb=verb);
     alpha = 0.0;
     ddAlpha = -1.0;
     while(ddAlpha<0.0):
+        if(verb>1):
+            print "Compute comAccLP with alpha=%.3f"%alpha;
         (imode, ddAlpha, slope, alpha_min, alpha_max) = comAccLP.compute_max_deceleration(alpha);
 #        (imode3, ddAlpha3, slope3, alpha_min3, alpha_max3) = comAccLP2.compute_max_deceleration(alpha);
-        if(imode!=0):
-            print "LP failed!"
             
 #        if(imode3==0):
 #            print "LP2 ddAlpha_min(%.2f) = %.3f (slope %.3f, alpha_max %.3f, qp time %.3f)"%(alpha,ddAlpha3,slope3,alpha_max3,1e3*comAccLP2.qpTime);
@@ -537,9 +463,14 @@ def test(N_CONTACTS = 2, verb=0):
 #        else:
 #            print "LP failed!"
 
+        if(verb>1):
+            print "Compute comAccPP with alpha=%.3f"%alpha;
         (imode2, ddAlpha2, slope2, alpha_max2) = comAccPP.compute_max_deceleration(alpha);            
-        if(imode2!=0):
-            print "PP failed!";
+        
+        if(imode!=0 and imode2==0):
+            print "ERROR LP failed while PP did not!";
+        if(imode==0 and imode2!=0):
+            print "ERROR PP failed while LP did not!";
             
         error = False;
         if(imode!= 0 or imode2!=0):
@@ -558,7 +489,7 @@ def test(N_CONTACTS = 2, verb=0):
                 error = True;
 
         if(error and verb>0):
-            print "LP  ddAlpha_min(%.2f) = %.3f (slope %.3f, alpha_max %.3f, qp time %.3f)"%(alpha,ddAlpha,slope,alpha_max,1e3*comAccLP.qpTime);
+            print "LP  ddAlpha_min(%.2f) = %.3f (slope %.3f, alpha_max %.3f, qp time %.3f)"%(alpha,ddAlpha,slope,alpha_max,1e3*comAccLP.getLpTime());
             f = comAccLP.getContactForces();
             #print "Contact forces:\n", f;
             print "Contact force norms:", norm(f, axis=0);
@@ -610,14 +541,18 @@ def test(N_CONTACTS = 2, verb=0):
 if __name__=="__main__":
     import cProfile
     N_CONTACTS = 2;
-    VERB = 1;
-    N_TESTS = range(392,393);
+    SOLVER = 'cvxopt' # qpoases scipy
+    VERB = 0;
+#    N_TESTS = range(392,393);
+    N_TESTS = range(0,100);
     
     for i in N_TESTS:
         try:
             np.random.seed(i);
-            test(N_CONTACTS, VERB);
+            print "Test %d"%i
+            test(N_CONTACTS, VERB, SOLVER);
 #            ret = cProfile.run("test()");
         except Exception as e:
             print e;
+            raise
             continue;

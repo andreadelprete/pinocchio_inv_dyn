@@ -6,6 +6,7 @@ Created on Thu Sep  1 16:54:39 2016
 """
 
 from com_acc_LP import ComAccLP
+from pinocchio_inv_dyn.optimization.solver_LP_abstract import LP_status, LP_status_string
 from robust_equilibrium_DLP import RobustEquilibriumDLP
 import pinocchio_inv_dyn.plot_utils as plut
 import matplotlib.pyplot as plt
@@ -50,7 +51,8 @@ class StabilityCriterion(object):
     _outerIterations = 0;
     _innerIterations = 0;
     
-    def __init__ (self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, maxIter=1000, verb=0, regularization=1e-5):
+    def __init__ (self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, 
+                  maxIter=1000, verb=0, regularization=1e-5, solver='qpoases'):
         ''' Constructor
             @param c0 Initial CoM position
             @param dc0 Initial CoM velocity
@@ -80,7 +82,7 @@ class StabilityCriterion(object):
         else:
             self._v = np.array([1.0, 0.0, 0.0]);
         self._com_acc_solver  = ComAccLP(self._name+"_comAccLP", self._c0, self._v, self._contact_points, self._contact_normals, 
-                                         self._mu, self._g, self._mass, maxIter, verb-1, regularization);
+                                         self._mu, self._g, self._mass, maxIter, verb-1, regularization, solver);
         self._equilibrium_solver = RobustEquilibriumDLP(name+"_robEquiDLP", self._contact_points, self._contact_normals, 
                                                         self._mu, self._g, self._mass, verb=verb-1);
         
@@ -149,12 +151,12 @@ class StabilityCriterion(object):
                     print "[%s] Algorithm converged to Dalpha=%.3f" % (self._name, Dalpha);
                 return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
 
-            (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha, MAX_ITER);
+            (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha);
             
-            self._computationTime += self._com_acc_solver.qpTime;
+            self._computationTime += self._com_acc_solver.getLpTime();
             self._outerIterations += 1;
             
-            if(self._com_acc_solver.is_infeasible(imode)):
+            if(imode==LP_status.INFEASIBLE):
                 # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
                 if(self._verb>0):
                     from com_acc_LP import ComAccPP
@@ -171,7 +173,7 @@ class StabilityCriterion(object):
                 return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
 
             if(imode!=0):
-                raise ValueError("[%s] Error while solving com acc LP: %s"%(self._name, qpOasesSolverMsg(imode)))
+                raise ValueError("[%s] Error while solving com acc LP: %s"%(self._name, LP_status_string[imode]))
 
             if(self._verb>0):
                 print "[%s] DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, DDalpha_min, alpha, Dalpha, alpha_max, a);
@@ -351,9 +353,9 @@ class StabilityCriterion(object):
             raise ValueError("[%s] NOT IMPLEMENTED YET: initial velocity is zero but system is not in static equilibrium!"%(self._name));
 
         for iiii in range(MAX_ITER):
-            (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha, MAX_ITER);
+            (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha);
             
-            self._computationTime += self._com_acc_solver.qpTime;
+            self._computationTime += self._com_acc_solver.getLpTime();
             self._outerIterations += 1;
             
             if(imode!=0):
@@ -472,7 +474,7 @@ class StabilityCriterion(object):
         raise ValueError("[%s] Algorithm did not converge in %d iterations"%(self._name, MAX_ITER));
     
     
-def test(N_CONTACTS = 2, verb=0):
+def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, can_I_stop
     DO_PLOTS = False;
     PLOT_3D = False;
@@ -542,7 +544,7 @@ def test(N_CONTACTS = 2, verb=0):
         print "c", c0.T;
         print "dc", dc0.T;
         
-    stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb);
+    stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
     try:
         res = stabilitySolver.can_I_stop();
     except Exception as e:
@@ -571,6 +573,7 @@ def test(N_CONTACTS = 2, verb=0):
 
 if __name__=="__main__":
     N_CONTACTS = 2;
+    SOLVER = 'cvxopt'; # cvxopt
     VERB = 0;
     N_TESTS = range(0,100);
     time    = np.zeros(len(N_TESTS));
@@ -582,7 +585,7 @@ if __name__=="__main__":
     for i in N_TESTS:
         try:
             np.random.seed(i);
-            (time[j], outIter[j], inIter[j]) = test(N_CONTACTS, verb=VERB);
+            (time[j], outIter[j], inIter[j]) = test(N_CONTACTS, SOLVER, verb=VERB);
             print "Test %3d, time %3.2f, outIter %3d, inIter %3d" % (i, 1e3*time[j], outIter[j], inIter[j]);
             j += 1;
 #            ret = cProfile.run("test()");
