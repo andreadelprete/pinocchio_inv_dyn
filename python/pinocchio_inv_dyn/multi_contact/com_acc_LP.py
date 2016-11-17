@@ -376,6 +376,10 @@ class ComAccLP (object):
         U, s, VT = np.linalg.svd(self.K);
         rank = int((s > EPS).sum());  
         print "rank(K)=%d, dim=%d"%(rank, n_as);
+
+    def is_infeasible(self, imode):
+        return (imode==PyReturnValue.INIT_FAILED_INFEASIBILITY or 
+                imode==PyReturnValue.HOTSTART_STOPPED_INFEASIBILITY);
     
 
 class ComAccPP(object):
@@ -414,6 +418,10 @@ class ComAccPP(object):
         ''' Find current active inequality: b*DDalpha <= d - a*alpha (i.e. DDalpha lower bound for current alpha value) ''' 
         #sort b indices to only keep negative values
         negative_ids = np.where(self.b<-EPS)[0];
+        if(negative_ids.shape[0]==0):
+            if(self.verb>0):
+                print "[%s] INFO Com acceleration is unbounded below"%(self.name);
+            return (0, -1e100, 0.0, 1e100);
         a_alpha_d = self.a*alpha-self.d;
         a_alpha_d_negative_bs = a_alpha_d[negative_ids];
         (i_DDalpha_min, DDalpha_min) = [(i,a_min) for (i, a_min) in [(j, a_alpha_d[j]) for j in negative_ids] if (a_min >= a_alpha_d_negative_bs).all()][0];

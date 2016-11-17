@@ -1,6 +1,7 @@
 from cdd import Matrix, Polyhedron, RepType
 from numpy import array, hstack, zeros, ones
 import numpy as np
+import warnings
 
 NUMBER_TYPE = 'float'  # 'float' or 'fraction'
 
@@ -55,6 +56,18 @@ def cone_span_to_face(S, eliminate_redundancies=False):
         except:
             print "RuntimeError: failed to canonicalize matrix";
     H = array(H_matrix);
+    if(len(H.shape)<2):
+#        warnings.warn("[cone_span_to_face] H is a vector rather than a matrix. S:\n"+str(S)+"\nH:\n"+str(H));
+#        S += 1e-6*np.random.rand(S.shape[0], S.shape[1]);
+#        V = hstack([zeros((S.shape[1], 1)), S.T])
+#        V_cdd = Matrix(V, number_type=NUMBER_TYPE)
+#        V_cdd.rep_type = RepType.GENERATOR
+#        P = Polyhedron(V_cdd)
+#        H_matrix = P.get_inequalities();
+#        H = array(H_matrix);
+#        if(len(H.shape)<2):
+        raise ValueError("[cone_span_to_face] Cddlib failed to convert cone span to face: H is a vector rather than a matrix. S^T:\n"+
+                         str(S.T)+"\nH:\n"+str(H));
     if(H.shape[1]>1):
         b = H[:, 0]
         A = H[:, 1:]

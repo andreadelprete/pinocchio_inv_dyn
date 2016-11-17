@@ -72,15 +72,17 @@ class StabilityCriterion(object):
         self._mass              = mass;
         self._g                 = np.asarray(g).squeeze().copy();
 #        self._regularization    = regularization;
-#        self._mu                = mu;
-#        self._contact_points    = np.asarray(contact_points).copy();
-#        self._contact_normals   = np.asarray(contact_normals).copy();
+        self._mu                = mu;
+        self._contact_points    = np.asarray(contact_points).copy();
+        self._contact_normals   = np.asarray(contact_normals).copy();
         if(norm(self._dc0)!=0.0):
             self._v = self._dc0/norm(self._dc0);
         else:
             self._v = np.array([1.0, 0.0, 0.0]);
-        self._com_acc_solver  = ComAccLP(self._name, self._c0, self._v, contact_points, contact_normals, mu, self._g, self._mass, maxIter, verb, regularization);
-        self._equilibrium_solver = RobustEquilibriumDLP(name, contact_points, contact_normals, mu, self._g, self._mass, verb=verb);
+        self._com_acc_solver  = ComAccLP(self._name+"_comAccLP", self._c0, self._v, self._contact_points, self._contact_normals, 
+                                         self._mu, self._g, self._mass, maxIter, verb-1, regularization);
+        self._equilibrium_solver = RobustEquilibriumDLP(name+"_robEquiDLP", self._contact_points, self._contact_normals, 
+                                                        self._mu, self._g, self._mass, verb=verb-1);
         
 
     def set_contacts(self, contact_points, contact_normals, mu):
@@ -152,9 +154,24 @@ class StabilityCriterion(object):
             self._computationTime += self._com_acc_solver.qpTime;
             self._outerIterations += 1;
             
-            if(imode!=0):
+            if(self._com_acc_solver.is_infeasible(imode)):
                 # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
+                if(self._verb>0):
+                    from com_acc_LP import ComAccPP
+                    self._comAccPP = None;
+                    try:
+                        self._comAccPP = ComAccPP(self._name+"_comAccPP", self._c0, self._v, self._contact_points, self._contact_normals, 
+                                                  self._mu, self._g, self._mass, verb=self._verb-1);
+                        (imode2, DDalpha_min2, a2, alpha_max2) = self._comAccPP.compute_max_deceleration(alpha);
+                    except Exception as e:
+                        print "[%s] Error while trying to compute min com acc with ComAccPP. "%(self._name)+str(e);
+                    
+                    if(self._comAccPP is not None and imode2==0):
+                        raise ValueError("[%s] Computing min com acc with PP gave different result than with LP: "%(self._name)+str(DDalpha_min2));
                 return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
+
+            if(imode!=0):
+                raise ValueError("[%s] Error while solving com acc LP: %s"%(self._name, qpOasesSolverMsg(imode)))
 
             if(self._verb>0):
                 print "[%s] DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, DDalpha_min, alpha, Dalpha, alpha_max, a);
