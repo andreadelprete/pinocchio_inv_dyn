@@ -35,10 +35,16 @@ class SolverLPAbstract (object):
         
         
     def reset(self):
+        ''' Reset the solver status so that, at the next call of solve(),
+            no warm start is used.
+        '''
         self._initialized    = False;
         
         
     def set_option(self, key, value):
+        ''' Try to set the value of the specified solver option.
+            Return True if the operation succeeded, False otherwise.
+        '''
         return False;
 
 
@@ -49,9 +55,9 @@ class SolverLPAbstract (object):
                          A_eq x = b
                          lb <= x <= ub
             Return a tuple containing:
-                status flag
+                status flag (LP_status)
                 primal solution
-                dual solution
+                dual solution: Lagrange multipliers in this order: inequalities, bounds, equalities
         '''
         pass;
         
@@ -99,7 +105,6 @@ class SolverLPAbstract (object):
         ''' Set the current maximum number of iterations performed by the solver. '''
         self._maxIter = maxIter;
 
-
     
     def getMaximumTime(self):
         ''' Get the maximum time allowed to solve a problem. '''
@@ -112,12 +117,9 @@ class SolverLPAbstract (object):
         
         
     def getLpTime(self):
+        ''' Get the time taken by the last LP computation (in seconds). '''
         return self._lpTime;
-        
-  
-import solver_LP_qpoases #import SolverLPQpOases
-import solver_LP_scipy
-import solver_LP_cvxopt
+
 
 def getNewSolver(solverType, name, maxIter=1000, maxTime=100.0, useWarmStart=True, verb=0):
     ''' Create a new LP solver of the specified type.
@@ -125,10 +127,13 @@ def getNewSolver(solverType, name, maxIter=1000, maxTime=100.0, useWarmStart=Tru
        @return A pointer to the new solver.
     '''
     if(solverType=='qpoases'):
-        return solver_LP_qpoases.SolverLPQpOases(name, maxIter, maxTime, useWarmStart, verb);
+        from solver_LP_qpoases import SolverLPQpOases
+        return SolverLPQpOases(name, maxIter, maxTime, useWarmStart, verb);
     if(solverType=='scipy'):
-        return solver_LP_scipy.SolverLPScipy(name, maxIter, maxTime, useWarmStart, verb);
+        from solver_LP_scipy import SolverLPScipy
+        return SolverLPScipy(name, maxIter, maxTime, useWarmStart, verb);
     if(solverType=='cvxopt'):
-        return solver_LP_cvxopt.SolverLPCvxopt(name, maxIter, maxTime, useWarmStart, verb);
+        from solver_LP_cvxopt import SolverLPCvxopt
+        return SolverLPCvxopt(name, maxIter, maxTime, useWarmStart, verb);
 
     raise ValueError("[%s] Unrecognized solver type: %s"%(name, solverType));

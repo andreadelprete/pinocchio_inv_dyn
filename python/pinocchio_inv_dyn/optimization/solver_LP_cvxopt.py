@@ -82,15 +82,17 @@ class SolverLPCvxopt(solver_LP_abstract.SolverLPAbstract):
             self.checkConstraints(self._x, lb, ub, A_in, Alb, Aub, A_eq, b);
             if(res.has_key('iterations')):
                 self._iter      = res['iterations'];
-            z = np.array(res['z']).reshape(2*m_in+2*n); # Lagrange multipliers for inequality constraints
+            z = np.array(res['z']).reshape(2*m_in+2*n); # Lagrange multipliers for inequality constraints and bounds
 #            print "z", z.T
 #            print "z!=0", z[z!=0.0].shape
 #            print "min z!=0", np.min(np.abs(z[z!=0.0]))
+            # take the multiplier corresponding to the active inequality constraints (upper or lower)
             for i in range(m_in):
                 if(z[i]!=0.0):
                     self._y[i] = z[i];
                 else:
                     self._y[i] = z[i+m_in];
+            # take the multiplier corresponding to the active bounds (upper or lower)
             for i in range(n):
                 if(z[2*m_in+i]!=0.0):
                     self._y[m_in+i] = z[2*m_in+i];
