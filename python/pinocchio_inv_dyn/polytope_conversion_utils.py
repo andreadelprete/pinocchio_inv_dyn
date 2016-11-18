@@ -66,8 +66,7 @@ def cone_span_to_face(S, eliminate_redundancies=False):
 #        H_matrix = P.get_inequalities();
 #        H = array(H_matrix);
 #        if(len(H.shape)<2):
-        raise ValueError("[cone_span_to_face] Cddlib failed to convert cone span to face: H is a vector rather than a matrix. S^T:\n"+
-                         str(S.T)+"\nH:\n"+str(H));
+        raise ValueError("[cone_span_to_face] Cddlib failed to convert cone span to face: H is a vector rather than a matrix. H: "+str(H));
     if(H.shape[1]>1):
         b = H[:, 0]
         A = H[:, 1:]

@@ -158,7 +158,7 @@ class StabilityCriterion(object):
             
             if(imode==LP_status.INFEASIBLE):
                 # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
-                if(self._verb>0):
+                if(self._verb>1):
                     from com_acc_LP import ComAccPP
                     self._comAccPP = None;
                     try:
