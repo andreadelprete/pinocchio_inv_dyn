@@ -55,11 +55,11 @@ def computeVelLimits(q, qMin, qMax, dqMax, ddqMax, verbose=False):
     if(q<qMin-EPS):
         if(verbose):
             print "State (%f) not viable because q<qMin" % (q);
-        return None;
+        raise ValueError("State not viable because q<qMin: %f" % (qMin-q))
     if(q>qMax+EPS):
         if(verbose):
             print "State (%f) not viable because q>qMax" % (q);
-        return None;
+        raise ValueError("State not viable because q>qMax: %f" % (q-qMax))
     dqMaxViab = min( dqMax,  sqrt(max(0,2*ddqMax*(qMax-q))));
     dqMinViab = max(-dqMax, -sqrt(max(0,2*ddqMax*(q-qMin))));
     return (dqMinViab, dqMaxViab);
