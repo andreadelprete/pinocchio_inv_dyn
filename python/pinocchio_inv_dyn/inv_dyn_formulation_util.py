@@ -288,6 +288,13 @@ class InvDynFormulation (object):
                 del self.task_weights[i];
                 return True;
         raise ValueError("[InvDynForm] ERROR: task %s cannot be removed because it does not exist!" % task_name);
+
+    def setTaskWeight(self, task_name, weight):
+        for (i,t) in enumerate(self.tasks):
+            if t.name==task_name:
+                self.task_weights[i] = weight;
+                return True;
+        raise ValueError("[InvDynForm] ERROR: task %s does not exist!" % task_name);
         
         
     def updateSupportPolygon(self):
