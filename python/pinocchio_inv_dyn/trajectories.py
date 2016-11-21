@@ -93,6 +93,7 @@ class SmoothedNdTrajectory (object):
     self._name = name
     self._dim = x_ref.shape[0]
     self._dt  = dt;
+    self._t_init = t_init;
     (self._x_ref, self._v_ref, self._a_ref) = computeSecondOrderPolynomialFitting(x_ref, dt, window_length);
     self._T = self._x_ref.shape[1]*dt;
 

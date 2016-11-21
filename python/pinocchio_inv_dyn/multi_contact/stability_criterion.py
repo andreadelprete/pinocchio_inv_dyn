@@ -106,7 +106,9 @@ class StabilityCriterion(object):
               is_stable -- boolean value
               c -- final com position
               dc -- final com velocity
+              ddc_min -- minimum feasible com acceleration at the final com position (to be used as a stability margin)
               t -- time taken to reach the final com state
+              computation_time -- time taken to solve all the LPs
         '''
         #- Initialize: alpha=0, Dalpha=||dc0||
         #- LOOP:
@@ -140,16 +142,19 @@ class StabilityCriterion(object):
         self._computationTime = 0.0;
         self._outerIterations = 0;
         self._innerIterations = 0;
+        last_ddc_min = None;
         
         if(Dalpha==0.0):
             r = self._equilibrium_solver.compute_equilibrium_robustness(self._c0);
-            return Bunch(is_stable=r>=0.0, c=self._c0, dc=self._dc0, t=0.0);
+            return Bunch(is_stable=(r>=0.0), c=self._c0, dc=self._dc0, t=0.0, computation_time=0.0,
+                         ddc_min=None);
 
         for iiii in range(MAX_ITER):
             if(last_iteration):
                 if(self._verb>0):
                     print "[%s] Algorithm converged to Dalpha=%.3f" % (self._name, Dalpha);
-                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int, 
+                             computation_time=self._computationTime, ddc_min=0.0);
 
             (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha);
             
@@ -170,10 +175,13 @@ class StabilityCriterion(object):
                     
                     if(self._comAccPP is not None and imode2==0):
                         raise ValueError("[%s] Computing min com acc with PP gave different result than with LP: "%(self._name)+str(DDalpha_min2));
-                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int,
+                             computation_time=self._computationTime, ddc_min=None);
 
-            if(imode!=0):
+            if(imode!=LP_status.OPTIMAL):
                 raise ValueError("[%s] Error while solving com acc LP: %s"%(self._name, LP_status_string[imode]))
+                
+            last_ddc_min = DDalpha_min;
 
             if(self._verb>0):
                 print "[%s] DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, DDalpha_min, alpha, Dalpha, alpha_max, a);
@@ -181,7 +189,8 @@ class StabilityCriterion(object):
             if(DDalpha_min>-EPS):
                 if(self._verb>0):
                     print "[%s] Minimum com acceleration is positive, so I cannot stop"%(self._name);
-                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int,
+                             computation_time=self._computationTime, ddc_min=DDalpha_min);
 
             # DDalpha_min is the acceleration corresponding to the current value of alpha
             # compute DDalpha_0, that is the acceleration corresponding to alpha=0
@@ -209,7 +218,8 @@ class StabilityCriterion(object):
                 if(alpha_t <= alpha_max+EPS):
                     if(self._verb>0):
                         print "DDalpha_min is independent from alpha, algorithm converged to Dalpha=0";
-                    return Bunch(is_stable=True, c=self._c0+alpha_t*self._v, dc=0.0*self._v, t=t_int+t_zero);
+                    return Bunch(is_stable=True, c=self._c0+alpha_t*self._v, dc=0.0*self._v, t=t_int+t_zero,
+                                 computation_time=self._computationTime, ddc_min=DDalpha_min);
 
                 # if alpha reaches alpha_max before the velocity is zero, then compute the time needed to reach alpha_max
                 #     alpha(t) = alpha(0) + t*Dalpha(0) + 0.5*t*t*DDalpha = alpha_max
@@ -278,7 +288,8 @@ class StabilityCriterion(object):
                         print "[%s] Algorithm converged to Dalpha=0"%self._name;
                     self._innerIterations += jjjj;
                     t_int += t;
-                    return Bunch(is_stable=True, c=self._c0+alpha_t*self._v, dc=Dalpha_t*self._v, t=t_int);
+                    return Bunch(is_stable=True, c=self._c0+alpha_t*self._v, dc=Dalpha_t*self._v, t=t_int,
+                                 computation_time=self._computationTime, ddc_min=DDalpha_0+a*alpha_t);
                 if(abs(alpha_t-alpha_max)<EPS and Dalpha_t>0):
                     alpha = alpha_max+EPS;
                     Dalpha = Dalpha_t;
