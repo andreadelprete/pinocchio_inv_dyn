@@ -157,7 +157,10 @@ class Viewer(object):
     def addBox(self, name, size, xyz, rpy, color=(0,0,0,1.0), lightingMode='ON'):
         if(ENABLE_VIEWER):
             position = xyzRpyToViewerConfig(xyz, rpy);
-            self.robot.viewer.gui.addBox('world/'+name, size[0]/2, size[1]/2, size[2]/2, color);
+            try:
+                self.robot.viewer.gui.addBox('world/'+name, size[0]/2, size[1]/2, size[2]/2, color);
+            except:
+                pass
             self.robot.viewer.gui.applyConfiguration('world/'+name, position);
             self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
             self.robot.viewer.gui.refresh();
@@ -165,7 +168,10 @@ class Viewer(object):
     def addSphere(self,name, radius, xyz, rpy=mat_zeros(3), color=(0,0,0,1.0), lightingMode='ON'):
         if(ENABLE_VIEWER):
             position = xyzRpyToViewerConfig(xyz, rpy);
-            self.robot.viewer.gui.addSphere('world/'+name, radius, color);
+            try:
+                self.robot.viewer.gui.addSphere('world/'+name, radius, color);
+            except:
+                pass
             self.robot.viewer.gui.applyConfiguration('world/'+name, position)
             self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
             self.robot.viewer.gui.refresh();
@@ -173,7 +179,10 @@ class Viewer(object):
     def addCylinder(self,name, radius, length, xyz, rpy, color=(0,0,0,1.0), lightingMode='ON'):
         if(ENABLE_VIEWER):
             position = xyzRpyToViewerConfig(xyz, rpy);
-            self.robot.viewer.gui.addCylinder('world/'+name, radius, length, color);
+            try:
+                self.robot.viewer.gui.addCylinder('world/'+name, radius, length, color);
+            except:
+                pass
             self.robot.viewer.gui.applyConfiguration('world/'+name, position)
             self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
             self.robot.viewer.gui.refresh();
@@ -182,7 +191,10 @@ class Viewer(object):
         if(ENABLE_VIEWER):
             length = norm(pos1-pos2);
             self.arrow_radius[name] = radius;
-            self.robot.viewer.gui.addArrow('world/'+name, radius, length, color);
+            try:
+                self.robot.viewer.gui.addArrow('world/'+name, radius, length, color);
+            except:
+                pass
             self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
             self.updateObjectConfigRpy(name, pos1);
         
@@ -213,16 +225,22 @@ class Viewer(object):
         
     def addLine(self,name, pos1, pos2, color=(0,0,0,1.0), lightingMode='ON'):
         if(ENABLE_VIEWER):
-            if(len(pos1.shape)==1):
-                self.robot.viewer.gui.addLine('world/'+name, (pos1[0], pos1[1], pos1[2]), (pos2[0], pos2[1], pos2[2]), color);
-            else:
-                self.robot.viewer.gui.addLine('world/'+name, (pos1[0,0], pos1[1,0], pos1[2,0]), (pos2[0,0], pos2[1,0], pos2[2,0]), color);
-            self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
-            
+            try:
+                if(len(pos1.shape)==1):
+                    self.robot.viewer.gui.addLine('world/'+name, (pos1[0], pos1[1], pos1[2]), (pos2[0], pos2[1], pos2[2]), color);
+                else:
+                    self.robot.viewer.gui.addLine('world/'+name, (pos1[0,0], pos1[1,0], pos1[2,0]), (pos2[0,0], pos2[1,0], pos2[2,0]), color);
+                self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
+            except:
+                pass
+
     def addMesh(self, name, filename, xyz=mat_zeros(3), rpy=mat_zeros(3)):
         if(ENABLE_VIEWER):
             position = xyzRpyToViewerConfig(xyz, rpy);
-            self.robot.viewer.gui.addMesh("world/"+name, filename);
+            try:
+                self.robot.viewer.gui.addMesh("world/"+name, filename);
+            except:
+                pass
             self.robot.viewer.gui.applyConfiguration('world/'+name, position);
             self.robot.viewer.gui.refresh();
 
