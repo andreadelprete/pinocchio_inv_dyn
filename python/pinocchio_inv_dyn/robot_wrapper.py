@@ -99,13 +99,19 @@ class RobotWrapper(PinocchioRobotWrapper):
                 self.viewer.gui.createSceneWithFloor("world")
             self.viewer.gui.addSceneToWindow("world", self.windowID)
     
-        self.viewer.gui.createGroup(nodeName)
+        try:
+            self.viewer.gui.createGroup(nodeName)
+        except:
+            pass
 
         # iterate over visuals and create the meshes in the viewer
-        for visual in self.visual_model.geometryObjects :
-            meshName = self.viewerNodeNames(visual) 
-            meshPath = visual.meshPath
-            self.viewer.gui.addMesh(meshName, meshPath)
+        for visual in self.visual_model.geometryObjects :			
+            try:
+                meshName = self.viewerNodeNames(visual) 
+                meshPath = visual.meshPath
+                self.viewer.gui.addMesh(meshName, meshPath)
+            except:
+                pass
 
         # Finally, refresh the layout to obtain your first rendering.
         self.viewer.gui.refresh()
