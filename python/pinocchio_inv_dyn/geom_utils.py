@@ -162,7 +162,7 @@ def plot_polytope(A, b, V=None, color='b', ax=None, plotLines=True, lw=4):
             xx[1] = V[(i+1)%n,0];
             yy[0] = V[i,1];
             yy[1] = V[(i+1)%n,1];
-            line, = ax.plot(xx, yy, color='r', ls='o', markersize=30); #, lw=2*lw);
+            line, = ax.plot(xx, yy, color='r', ls='-', markersize=30); #, lw=2*lw);
         ax.set_xlim([X_MIN, X_MAX]);
         ax.set_ylim([Y_MIN, Y_MAX]);
     
