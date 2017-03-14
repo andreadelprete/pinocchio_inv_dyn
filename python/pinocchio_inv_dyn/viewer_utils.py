@@ -196,7 +196,8 @@ class Viewer(object):
             except:
                 pass
             self.robot.viewer.gui.setLightingMode('world/'+name, lightingMode);
-            self.updateObjectConfigRpy(name, pos1);
+#            self.updateObjectConfigRpy(name, pos1);
+            self.moveArrow(name, pos1, pos2);
         
     def resizeArrow(self, name, radius, length, refresh=True):
         if(ENABLE_VIEWER):
