@@ -44,6 +44,7 @@ def cone_span_to_face(S, eliminate_redundancies=False):
         {x = S z, z >= 0} if and only if {S^F x <= 0}.
 
     """
+    S = np.asarray(S).squeeze();
     V = hstack([zeros((S.shape[1], 1)), S.T])
     # V-representation: first column is 0 for rays
     V_cdd = Matrix(V, number_type=NUMBER_TYPE)
