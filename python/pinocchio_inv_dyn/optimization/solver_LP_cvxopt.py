@@ -52,7 +52,7 @@ class SolverLPCvxopt(solver_LP_abstract.SolverLPAbstract):
             self._A_ub[m_in:2*m_in]         = -Alb;
 
         self._A_in[2*m_in:2*m_in+n,:]   = np.identity(n);
-        self._A_in[3*m_in+n:,:]         = -np.identity(n);
+        self._A_in[2*m_in+n:,:]         = -np.identity(n);
         self._A_ub[2*m_in:2*m_in+n]     = ub;
         self._A_ub[2*m_in+n:]           = -lb;
             
