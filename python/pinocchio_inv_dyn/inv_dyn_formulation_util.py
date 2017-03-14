@@ -325,7 +325,7 @@ class InvDynFormulation (object):
                 (self.B_sp, self.b_sp) = compute_convex_hull(self.contact_points[:2,:].A);
             else:
                 (H,h) = compute_GIWC(self.contact_points.T, self.contact_normals.T, mu_s);
-                (self.B_sp, self.b_sp) = compute_support_polygon(H, h, self.M[0,0], np.array([0.,0.,-9.81]), eliminate_redundancies=True);
+                (self.B_sp, self.b_sp) = compute_support_polygon(H, h, self.M[0,0], np.array([0.,0.,-9.81]), eliminate_redundancies=False);
                 self.B_sp *= -1.0;                
             
             # normalize inequalities
