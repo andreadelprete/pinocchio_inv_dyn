@@ -487,7 +487,7 @@ class StabilityCriterion(object):
     
 def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, can_I_stop
-    DO_PLOTS = False;
+    DO_PLOTS = True;
     PLOT_3D = False;
     mass = 75;             # mass of the robot
     mu = 0.5;           # friction coefficient
@@ -536,8 +536,10 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         plt.title('Contact Points and CoM position'); 
         
     if(PLOT_3D):
+        from mpl_toolkits.mplot3d import axes3d, Axes3D
         fig = plt.figure(figsize=plt.figaspect(0.5)*1.5)
-        ax = fig.gca(projection='3d')
+        ax = Axes3D(fig)
+#        ax = fig.gca(projection='3d')
         line_styles =["b", "r", "c", "g"];
         ss = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3];
         ax.scatter(c0[0],c0[1],c0[2], c='k', marker='o');
@@ -586,7 +588,7 @@ if __name__=="__main__":
     N_CONTACTS = 2;
     SOLVER = 'cvxopt'; # cvxopt
     VERB = 0;
-    N_TESTS = range(0,100);
+    N_TESTS = range(0,10);
     time    = np.zeros(len(N_TESTS));
     outIter = np.zeros(len(N_TESTS));
     inIter  = np.zeros(len(N_TESTS));
