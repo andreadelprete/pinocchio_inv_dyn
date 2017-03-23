@@ -248,7 +248,7 @@ class StabilityCriterion(object):
                 tmp = - Dalpha / (omega*(alpha + (DDalpha_0/a)));
                 if(abs(np.real(tmp))<1.0):
                     t = np.arctanh(tmp) / omega;
-                    if(np.imag(t) != 0.0):
+                    if(abs(np.imag(t)) > EPS):
                         raise ValueError("[%s] ERROR time to reach zero vel is imaginary: "%self._name +str(t)+"a=%.3f"%(a));
                     t = np.real(t);
                     t_ub = t;   # use this time as an upper bound for the search
