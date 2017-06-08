@@ -3,7 +3,7 @@ from numpy.linalg import norm
 from numpy.random import random
 from pinocchio_inv_dyn.robot_wrapper import RobotWrapper
 import pinocchio as se3
-from staggered_projections import StaggeredProjections
+#~ from staggered_projections import StaggeredProjections
 from constraint_violations import ForceConstraintViolation, PositionConstraintViolation, VelocityConstraintViolation, TorqueConstraintViolation, ConstraintViolationType
 from first_order_low_pass_filter import FirstOrderLowPassFilter
 import time
@@ -180,7 +180,7 @@ class Simulator (object):
         
         self.reset(0, q, v, dt);
         
-        self.LCP = StaggeredProjections(self.nv, self.mu[0], accuracy=EPS, verb=0);
+        #~ self.LCP = StaggeredProjections(self.nv, self.mu[0], accuracy=EPS, verb=0);
         
         if(self.DISPLAY_COM):
             self.viewer.addSphere('com', self.COM_SPHERE_RADIUS, zeros(3), zeros(3), self.COM_SPHERE_COLOR, 'OFF');
