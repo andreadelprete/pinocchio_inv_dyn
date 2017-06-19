@@ -324,9 +324,14 @@ class InvDynFormulation (object):
                     vertical projection of contact points'''
                 (self.B_sp, self.b_sp) = compute_convex_hull(self.contact_points[:2,:].A);
             else:
-                (H,h) = compute_GIWC(self.contact_points.T, self.contact_normals.T, mu_s);
-                (self.B_sp, self.b_sp) = compute_support_polygon(H, h, self.M[0,0], np.array([0.,0.,-9.81]), eliminate_redundancies=False);
-                self.B_sp *= -1.0;                
+                try:
+                    (H,h) = compute_GIWC(self.contact_points.T, self.contact_normals.T, mu_s);
+                    (self.B_sp, self.b_sp) = compute_support_polygon(H, h, self.M[0,0], np.array([0.,0.,-9.81]), eliminate_redundancies=False);
+                    self.B_sp *= -1.0;
+                except:
+                    print "WARNING: failed to compute support polygon using poytope projection. Gonna use convex hull instead.";
+                    (self.B_sp, self.b_sp) = compute_convex_hull(self.contact_points[:2,:].A);
+                    pass;
             
             # normalize inequalities
             for i in range(self.B_sp.shape[0]):
