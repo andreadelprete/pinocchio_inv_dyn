@@ -1,5 +1,6 @@
 from math import sqrt
 import numpy as np
+import os
 
 ''' *********************** USER-PARAMETERS *********************** '''
 SOLVER_ID       = 0;    # classic TSID formulation
@@ -11,7 +12,8 @@ SAVE_DATA                   = True;
 ''' INITIAL STATE PARAMETERS '''
 MAX_TEST_DURATION           = 3000;
 dt                          = 1e-3;
-model_path                  = ["/home/adelpret/devel/sot_hydro/install/share"];
+ERROR_MSG                   = 'You should set the environment variable HRP2_MODEL_DIR to something like "$DEVEL_DIR/install/share"\n';
+model_path                  = [os.environ.get('HRP2_MODEL_DIR', ERROR_MSG)];
 urdfFileName                = model_path[0] + "/hrp2_14_description/urdf/hrp2_14_reduced.urdf";
 freeFlyer                   = True;
 q0 = np.matrix([0.0, 0.0, 0.648702, 0.0, 0.0 , 0.0, 1.0,                             # Free flyer 0-6
