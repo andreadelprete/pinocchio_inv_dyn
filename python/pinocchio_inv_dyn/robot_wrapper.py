@@ -35,6 +35,15 @@ class RobotWrapper(PinocchioRobotWrapper):
             return se3.nle(self.model, self.data, q, v)
         return self.data.nle
         
+    def com(self, q=None, v=None, a=None, update_kinematics=True):
+        if q is None:
+            return self.data.com[0]
+        if v is not None:
+            if a is None:
+                return self.data.com[0], self.data.vcom[0]
+            return self.data.com[0], self.data.vcom[0], self.data.acom[0]
+        return self.data.com[0]
+        
     def Jcom(self, q, update_kinematics=True):
         if(update_kinematics):
             return se3.jacobianCenterOfMass(self.model, self.data, q)
