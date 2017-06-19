@@ -19,10 +19,10 @@ DEFAULT_FONT_SERIF = ['Times New Roman', 'Times','Bitstream Vera Serif', 'DejaVu
 DEFAULT_FIGURE_FACE_COLOR = 'white'    # figure facecolor; 0.75 is scalar gray
 DEFAULT_LEGEND_FONT_SIZE = DEFAULT_FONT_SIZE;
 DEFAULT_AXES_LABEL_SIZE = DEFAULT_FONT_SIZE;  # fontsize of the x any y labels
-DEFAULT_TEXT_USE_TEX = True;
+DEFAULT_TEXT_USE_TEX = False;
 LINE_ALPHA = 0.9;
 SAVE_FIGURES = False;
-FILE_EXTENSIONS = ['png']; #,'eps'];
+FILE_EXTENSIONS = ['png']; #'pdf']; #['png']; #,'eps'];
 FIGURES_DPI = 150;
 SHOW_LEGENDS = False;
 LEGEND_ALPHA = 0.5;
@@ -84,7 +84,7 @@ mpl.rcParams['text.usetex']         = DEFAULT_TEXT_USE_TEX;
 mpl.rcParams['axes.labelsize']      = DEFAULT_AXES_LABEL_SIZE;
 mpl.rcParams['legend.fontsize']     = DEFAULT_LEGEND_FONT_SIZE;
 mpl.rcParams['figure.facecolor']    = DEFAULT_FIGURE_FACE_COLOR;
-mpl.rcParams['figure.figsize']      = 12, 9 #23, 12 #
+mpl.rcParams['figure.figsize']      = 23, 12 #12, 9 #
 
 def plot3dQuantity(quantity, title, ax=None, boundUp=None, boundLow=None, yscale='linear', linestyle='k'):
     return plotNdQuantity(3, 1, quantity, title, ax, boundUp, boundLow, yscale, linestyle);
