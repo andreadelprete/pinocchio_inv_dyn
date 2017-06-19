@@ -73,13 +73,13 @@ def plot_convex_hull(A, b, points=None):
     
             ax.plot(com_x, com_y, 'k-');        
 
-    if(points!=None):
+    if(not points is None):
         ax.plot(points[:,0], points[:,1], 'o', markersize=30);
         
     ax.set_xlim([X_MIN, X_MAX]);
     ax.set_ylim([Y_MIN, Y_MAX]);
     
-    plt.show()
+    return ax;
     
 
 if __name__ == "__main__":
