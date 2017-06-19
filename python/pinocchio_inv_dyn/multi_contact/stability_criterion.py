@@ -56,7 +56,11 @@ class StabilityCriterion(object):
         ''' Constructor
             @param c0 Initial CoM position
             @param dc0 Initial CoM velocity
+            @param contact points A matrix containing the contact points
+            @param contact normals A matrix containing the contact normals
+            @param mu Friction coefficient (either a scalar or an array)
             @param g Gravity vector
+            @param mass The robot mass            
             @param regularization Weight of the force minimization, the higher this value, the sparser the solution
         '''
         assert mass>0.0, "Mass is not positive"
@@ -97,10 +101,7 @@ class StabilityCriterion(object):
             Keyword arguments:
               c0 -- initial CoM position 
               dc0 -- initial CoM velocity 
-              contact points -- a matrix containing the contact points
-              contact normals -- a matrix containing the contact normals
-              mu -- friction coefficient (either a scalar or an array)
-              mass -- the robot mass
+              
               T_0 -- an initial guess for the time to stop
             Output: An object containing the following member variables:
               is_stable -- boolean value
