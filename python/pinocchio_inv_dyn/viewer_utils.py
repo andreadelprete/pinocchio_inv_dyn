@@ -30,6 +30,11 @@ def xyzRpyToViewerConfig(xyz, rpy):
     pinocchioConf = se3.utils.se3ToXYZQUAT(H);
     return se3.utils.XYZQUATToViewerConfiguration(pinocchioConf);
     
+def viewerConfigToXyzRpy(viewerConf):
+    xyzQuat = se3.utils.ViewerConfigurationToXYZQUAT(viewerConf);
+    M = se3.utils.XYZQUATToSe3(xyzQuat);
+    return (M.translation, se3.utils.matrixToRpy(M.rotation));
+    
 class Viewer(object):
     
     viewer = None;
@@ -37,7 +42,7 @@ class Viewer(object):
     robot = None;
 
     name = '';
-    PLAYER_FRAME_RATE = 20;
+    PLAYER_FRAME_RATE = 24;
     
     COM_SPHERE_RADIUS = 0.01;
     COM_SPHERE_COLOR = (1, 0, 0, 1);
@@ -59,7 +64,10 @@ class Viewer(object):
             self.robot.initDisplay("world/"+robotName, loadModel=False);
             self.robot.loadDisplayModel("world/"+robotName, robotName);
             self.robot.viewer.gui.setLightingMode('world/floor', 'OFF');
-            self.robots = {robotName: self.robot};                
+            self.robots = {robotName: self.robot};
+            
+    def addViewerWindow(self, windowName):
+        self.robot.loadDisplayModel("world/"+self.robots.keys()[0], windowName=windowName);
                 
     def addRobot(self, robotName, urdfModelPath, modelPath):
         if(ENABLE_VIEWER):
@@ -94,6 +102,15 @@ class Viewer(object):
             self.robot.viewer.gui.moveCamera(self.robot.windowID, target[0], target[1], target[2], \
                                              cameraPos[0], cameraPos[1], cameraPos[2], \
                                              upwardDirection[0], upwardDirection[1], upwardDirection[2]);
+                                             
+    def getCameraTransformRpy(self):
+        viewerConf = self.robot.viewer.gui.getCameraTransform(self.robot.windowID);
+        return viewerConfigToXyzRpy(viewerConf);
+        
+    def setCameraTransformRpy(self, xyzrpy):
+        viewerConfig = xyzRpyToViewerConfig(xyzrpy[0], xyzrpy[1]);
+        self.robot.viewer.gui.setCameraTransform(self.robot.windowID, viewerConfig);
+        
                                 
     def play(self, q, dt, slow_down_factor=1, print_time_every=-1.0, robotName='robot1'):
         self.addSphere('com', self.COM_SPHERE_RADIUS, zeros((3,1)), zeros((3,1)), self.COM_SPHERE_COLOR, 'OFF');
@@ -109,6 +126,8 @@ class Viewer(object):
                 timeLeft = timePeriod - (time()-lastRefreshTime);
                 if(timeLeft>0.0):
                     sleep(timeLeft);
+                if(timeLeft<0.0):
+                    print "WARNING: viewer is too slow, time left:", timeLeft;
                 self.robot.viewer.gui.refresh();
                 lastRefreshTime = time();
                 if(print_time_every>0.0 and t*dt%print_time_every==0.0):
