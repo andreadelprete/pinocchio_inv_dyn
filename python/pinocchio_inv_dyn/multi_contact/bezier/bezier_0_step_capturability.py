@@ -6,8 +6,8 @@ Created on Thu Sep  1 16:54:39 2016
 """
 
 from pinocchio_inv_dyn.optimization.solver_LP_abstract import LP_status, LP_status_string
-from pinocchio_inv_dyn.sot_utils import qpOasesSolverMsg
-from pinocchio_inv_dyn.multi_contact.stability_criterion import  Bunch, EPS
+#~ from pinocchio_inv_dyn.sot_utils import qpOasesSolverMsg
+#~ from pinocchio_inv_dyn.multi_contact.stability_criterion import  Bunch, EPS
 from pinocchio_inv_dyn.optimization.solver_LP_abstract import getNewSolver
 
 from spline import bezier, bezier6, polynom
@@ -23,6 +23,24 @@ import cProfile
 np.set_printoptions(precision=2, suppress=True, linewidth=100);
 
 from centroidal_dynamics import *
+
+__EPS = 1e-5;
+
+class Bunch:
+    def __init__(self, **kwds):
+        self.__dict__.update(kwds);
+
+    def __str__(self, prefix=""):
+        res = "";
+        for (key,value) in self.__dict__.iteritems():
+            if (isinstance(value, np.ndarray) and len(value.shape)==2 and value.shape[0]>value.shape[1]):
+                res += prefix+" - " + key + ": " + str(value.T) + "\n";
+            elif (isinstance(value, Bunch)):
+                res += prefix+" - " + key + ":\n" + value.__str__(prefix+"    ") + "\n";
+            else:
+                res += prefix+" - " + key + ": " + str(value) + "\n";
+        return res[:-1];
+
 ## 
 #  Given a list of contact points
 #  as well as a list of associated normals
@@ -33,13 +51,21 @@ from centroidal_dynamics import *
 #  \param mu friction coefficient
 #  \return the CWC H, H w <= 0, where w is the wrench. [WARNING!] TODO: The H matrix is such that 
 #  the wrench w is the one present in the ICRA paper 15 of del prete et al., contrary to the current c++ implementation
-def compute_CWC(p, N, mass, mu):	
+def compute_CWC(p, N, mass, mu):    
     __cg = 4; #num generators per contact
-	eq = Equilibrium("dyn_eq2", mass, __cg) 
-	eq.setNewContacts(asmatrix(p),asmatrix(N),mu,EquilibriumAlgorithm.EQUILIBRIUM_ALGORITHM_PP)
-	H, h = eq.getPolytopeInequalities()
-	assert(norm(h) < __EPS), "h is not equal to zero"
-	return np.squeeze(np.asarray(-H))
+    eq = Equilibrium("dyn_eq2", mass, __cg) 
+    eq.setNewContacts(asmatrix(p),asmatrix(N),mu,EquilibriumAlgorithm.EQUILIBRIUM_ALGORITHM_PP)
+    H, h = eq.getPolytopeInequalities()
+    assert(norm(h) < __EPS), "h is not equal to zero"
+    return np.squeeze(np.asarray(-H))
+
+def compute_w(c, ddc, dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81])):
+	w1 = m * (ddc - g_vec)
+	return array(w1.tolist() + (X(c, w1) + dL).tolist())
+
+def is_stable(H,c=array([0.,0.,0.]), ddc=array([0.,0.,0.]), dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81]), robustness = 0.):
+	w = compute_w(c, ddc, dL, m, g_vec)	
+	return (H.dot(w)<=-robustness).all()
 
 def skew(x):
     res = zeros([3,3])
@@ -52,12 +78,20 @@ def skew(x):
 
 def __init_6D():
     return zeros([6,3]), zeros(6)
-        
+      
+def normalize(A,b):
+    for i in range (A.shape[0]):
+        n_A = norm(A[i,:])
+        if(n_A != 0.):
+            A[i,:] = A[i,:] / n_A
+            b[i] = b[i] / n_A
+    return A, b
+       
 def w0(p0, p1, g, p0X, p1X, gX):
     wx, ws = __init_6D()    
     wx[:3,:] = 6*identity(3);  wx[3:,:] = 6*p0X;
     ws[:3]   = 6*(p0 - 2*p1) 
-    ws[3:]   = X(-p0, 12*(p1 + g )) 
+    ws[3:]   = X(-p0, 12*p1 + g ) 
     return  wx, ws
     
 def w1(p0, p1, g, p0X, p1X, gX):
@@ -73,12 +107,12 @@ def w2(p0, p1, g, p0X, p1X, gX):
     #~ wx[:3,:] = 0;  
     wx[3:,:] = skew(0.5*g - 3* p0 + 3*p1)
     ws[:3]   =  3*(p0 - p1);
-    ws[3:]   = -0.5 * gX.dot(p1) 
+    ws[3:]   = 0.5 * gX.dot(p1) 
     return  wx, ws
     
 def w3(p0, p1, g, p0X, p1X, gX):
     wx, ws = __init_6D()    
-    wx[:3,:] = -1.5 * identity(3);  
+    wx[:3,:] = -3 * identity(3);  
     wx[3:,:] = skew(g - 1.5 * (p1 + p0))
     ws[:3]   = 1.5 * (p1 + p0) 
     #~ ws[3:]   = 0 
@@ -141,24 +175,27 @@ class BezierZeroStepCapturability(object):
                                          #~ self._mu, self._g, self._mass, maxIter, verb-1, regularization, solver);
         #~ self._equilibrium_solver = RobustEquilibriumDLP(name+"_robEquiDLP", self._contact_points, self._contact_normals, 
                                                         #~ self._mu, self._g, self._mass, verb=verb-1);
-    def init_bezier(c0, dc0, n):
+    def init_bezier(self, c0, dc0, n):
         self._n = n
         self._p0 = c0[:]
-        self._p1 = dc0 / n +  self._po  
-        self._p0X = skew(self._p0)
+        self._p1 = dc0 / n +  self._p0  
+        self._p0X = skew(c0)
         self._p1X = skew(self._p1)
         self.compute_6d_control_point_inequalities()
+        
+        #~ print "checking static equilibrium is ok ..."
+        #~ print is_stable(self._H,c=self._p0, ddc=array([0.,0.,0.]), dL=array([0.,0.,0.]), m = self._mass, g_vec=self._g, robustness = 0.)
 
     def set_contacts(self, contact_points, contact_normals, mu):
         self._contact_points    = np.asarray(contact_points).copy();
         self._contact_normals   = np.asarray(contact_normals).copy();
         self._mu                = mu;
-        self._H                 = compute_CWC(self._contact_points, self._contact_normals, mass, mu)#CWC inequality matrix
+        self._H                 = compute_CWC(self._contact_points, self._contact_normals, self._mass, mu)#CWC inequality matrix
         #~ self._com_acc_solver.set_contacts(contact_points, contact_normals, mu);
         #~ self._equilibrium_solver = RobustEquilibriumDLP(self._name, contact_points, contact_normals, mu, self._g, self._mass, verb=self._verb);
         
         
-    def compute_6d_control_point_inequalities():
+    def compute_6d_control_point_inequalities(self):
         ''' compute the inequality methods that determine the 6D bezier curve w(t)
             as a function of a variable waypoint for the 3D COM trajectory.
             The initial curve is of degree 3 (init pos and velocity, 0 velocity constraints + one free variable).
@@ -168,18 +205,28 @@ class BezierZeroStepCapturability(object):
             Stacking all of these results in a big inequality matrix A and a column vector x that determines the constraints
             On the 6d curves, Ain x <= Aub
         '''        
-            eq = [w0,w1,w2,w3,w4]
-            dimH = self._H.shape[0]
-            mH = m *self._H 
-            self.__Ain =  = zeros(dimH * len(eq),3) 
-            self.__Aub = zeros(dimH * len(eq))
-            bc = mH.dot(np.concatenate([g,zeros(3)]))  #constant part of Aub, Aubi = bc - mH * wsi
-            for i, wi in enumerate(eq):                
-                wxi, wsi = wi(self.__p0, self.__p1, self.__g, self.__p0X, self.__p1X, self.__gX)                
-                self.__Ain[i*dimH : (i+1)*dimH, : ]  = mH.dot(wxi) #constant part of A, Ac = Ac * wxi
-                self.__Aub[i*dimH : (i+1)*dimH    ]  = bc - mH.dot(wsi)
-             
-
+        eq = [w0,w1,w2,w3,w4]
+        dimH = self._H.shape[0]
+        mH = self._mass *self._H 
+        A = zeros([dimH * len(eq),3]) 
+        b = zeros(dimH * len(eq))
+        bc = mH.dot(np.concatenate([self._g,zeros(3)]))  #constant part of Aub, Aubi = bc - mH * wsi
+        for i, wi in enumerate(eq):                
+            wxi, wsi = wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX)   
+            #~ print  "expected ", X(self._g,self._p0)          
+            #~ print  "res ", wxi[3:,:].dot(self._p0) +  wsi[3:]           
+            A[i*dimH : (i+1)*dimH, : ]  = mH.dot(wxi) #constant part of A, Ac = Ac * wxi
+            b[i*dimH : (i+1)*dimH    ]  = bc - mH.dot(wsi)
+            
+            #~ print "point ok ?"
+            #~ print ((mH.dot(wxi)).dot(self._p0) + (mH.dot(wsi)) - bc <=0.).all()
+            #~ print ((self._mass *self._H.dot(wxi)).dot(self._p0) + (self._mass *self._H.dot(wsi)) - self._mass *self._H.dot(self._g) <=0.).all()
+        #~ print 'are  they all ok ?'
+        A, b = normalize(A,b)
+        self.__Ain = A[:]; self.__Aub = b[:]
+        #~ print (self.__Ain.dot(self._p0) - self.__Aub <=0.).all()
+        
+        
     def can_I_stop(self, c0=None, dc0=None, T_0=None, MAX_ITER=None):
         ''' Determine whether the system can come to a stop without changing contacts.
             Keyword arguments:
@@ -205,9 +252,8 @@ class BezierZeroStepCapturability(object):
             self._dc0 = np.asarray(dc0).squeeze().copy();
         if((c0 is not None) or (dc0 is not None)):
             init_bezier(self._c0, self._dc0, self._n)
-        
-            
-            ''' Solve the linear program
+                    
+        ''' Solve the linear program
          minimize    c' x
          subject to  Alb <= A_in x <= Aub
                      A_eq x = b
@@ -218,11 +264,12 @@ class BezierZeroStepCapturability(object):
             dual solution
                 '''
         # for the moment c is random stuff
-        c = ones(3)
-        (status, self.x, self.y) = self._solver.solve(self, c, lb= -100 * ones(3), ub = 100 * ones(3), A_in=self.__Ain, Alb=None, Aub=self.__Aub, A_eq=None, b=None)
-            
-        return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int, 
-                             computation_time=self._computationTime, ddc_min=0.0);
+        c = ones(3);
+        (status, x, y) = self._solver.solve(c, lb= -100 * ones(3), ub = 100 * ones(3), A_in=self.__Ain, Alb=-100000* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
+        
+        
+        return Bunch(is_stable=status==LP_status.LP_STATUS_OPTIMAL, c=x, dc=zeros(3), 
+                             computation_time=-1, ddc_min=0.0);
 
     def predict_future_state(self, t_pred, c0=None, dc0=None, MAX_ITER=1000):
         ''' Compute what the CoM state will be at the specified time instant if the system
@@ -241,7 +288,7 @@ class BezierZeroStepCapturability(object):
     
 def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, can_I_stop
-    DO_PLOTS = True;
+    DO_PLOTS = False;
     PLOT_3D = False;
     mass = 75;             # mass of the robot
     mu = 0.5;           # friction coefficient
@@ -272,7 +319,7 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
         
     dc0 = np.random.uniform(-1, 1, size=3); 
-#    dc0[:] = 0;
+    #~ dc0[:] = 0;
     
     if(DO_PLOTS):
         f, ax = plut.create_empty_figure();
@@ -311,7 +358,7 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         print "c", c0.T;
         print "dc", dc0.T;
         
-    stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
+    stabilitySolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
     try:
         res = stabilitySolver.can_I_stop();
     except Exception as e:
@@ -323,10 +370,10 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
             raise
         
     try:
-        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
-        if((res.is_stable != has_stopped2) or 
-            not np.allclose(res.c, c_final2, atol=1e-3) or 
-            not np.allclose(res.dc, dc_final2, atol=1e-3)):
+        (has_stopped2, c_final2, dc_final2,t) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
+        if((res.is_stable != has_stopped2)):  
+            #~ or not np.allclose(res.c, c_final2, atol=1e-3))  :
+            #~ or not np.allclose(res.dc, dc_final2, atol=1e-3)):
             print "\nERROR: the two algorithms gave different results!"
             print "New algorithm:", res.is_stable, res.c, res.dc;
             print "Old algorithm:", has_stopped2, c_final2, dc_final2;
@@ -335,10 +382,43 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         print "\n\n *** Old algorithm failed: ", e
         print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
         
-    return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
+    return res.is_stable, has_stopped2, t
+    #~ return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
+    #~ return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
         
 
-#~ if __name__=="__main__":
+if __name__=="__main__":
+    mine_won = 0
+    mine_lose = 0
+    total_stop = 0
+    total_not_stop = 0
+    total_disagree = 0
+    times_disagree = []
+    times_agree_stop = []
+    
+    num_tested = 0.
+    for i in range(1000):
+        num_tested = i-1
+        mine, theirs, t = test()
+        if(mine != theirs):
+            total_disagree+=1
+            times_disagree +=[t]
+            if mine:
+                mine_won +=1
+            else:
+                mine_lose +=1
+        elif(mine or theirs):
+            total_stop+=1
+            times_agree_stop+=[t]
+        else:
+            total_not_stop+=1
+                
+    print "% of stops", 100. * float(total_stop) / num_tested
+    print "% of total_disagree", 100. * float(total_disagree) / num_tested
+    print "% of wins", 100. * float(mine_won) / total_disagree
+    print "% of lose", 100. * float(mine_lose) / total_disagree
+    print "times of disagreement\n ", times_disagree
+    print "times of agreement\n ", times_agree_stop
     #~ N_CONTACTS = 2;
     #~ SOLVER = 'cvxopt'; # cvxopt    
     #~ SOLVER = 'qpoases' # scipy
