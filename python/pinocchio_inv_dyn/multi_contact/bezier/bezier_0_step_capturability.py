@@ -125,6 +125,9 @@ def w4(p0, p1, g, p0X, p1X, gX):
     ws[:3]   = 6*p1 
     #~ ws[3:]   = 0 
     return  wx, ws
+    
+
+wis = [w0,w1,w2,w3,w4]
 
 class BezierZeroStepCapturability(object):
     _name = ""
@@ -181,7 +184,7 @@ class BezierZeroStepCapturability(object):
         self._p1 = dc0 / n +  self._p0  
         self._p0X = skew(c0)
         self._p1X = skew(self._p1)
-        self.compute_6d_control_point_inequalities()
+        #~ self.compute_6d_control_point_inequalities()
         
         #~ print "checking static equilibrium is ok ..."
         #~ print is_stable(self._H,c=self._p0, ddc=array([0.,0.,0.]), dL=array([0.,0.,0.]), m = self._mass, g_vec=self._g, robustness = 0.)
@@ -195,7 +198,7 @@ class BezierZeroStepCapturability(object):
         #~ self._equilibrium_solver = RobustEquilibriumDLP(self._name, contact_points, contact_normals, mu, self._g, self._mass, verb=self._verb);
         
         
-    def compute_6d_control_point_inequalities(self):
+    def compute_6d_control_point_inequalities(self, T):
         ''' compute the inequality methods that determine the 6D bezier curve w(t)
             as a function of a variable waypoint for the 3D COM trajectory.
             The initial curve is of degree 3 (init pos and velocity, 0 velocity constraints + one free variable).
@@ -205,18 +208,19 @@ class BezierZeroStepCapturability(object):
             Stacking all of these results in a big inequality matrix A and a column vector x that determines the constraints
             On the 6d curves, Ain x <= Aub
         '''        
-        eq = [w0,w1,w2,w3,w4]
-        dimH = self._H.shape[0]
-        mH = self._mass *self._H 
-        A = zeros([dimH * len(eq),3]) 
-        b = zeros(dimH * len(eq))
-        bc = mH.dot(np.concatenate([self._g,zeros(3)]))  #constant part of Aub, Aubi = bc - mH * wsi
-        for i, wi in enumerate(eq):                
+        global wis
+        dimH  = self._H.shape[0]
+        mH    = self._mass *self._H 
+        TTm1 = 1 / (T*T)
+        mH_TT = mH / TTm1
+        A = zeros([dimH * len(wis),3]) 
+        b = zeros(dimH * len(wis))
+        bc = np.concatenate([self._g,zeros(3)])  #constant part of Aub, Aubi = mH * (bc - wsi)
+        #~ bc = mH.dot(np.concatenate([self._g,zeros(3)]))  #constant part of Aub, Aubi = mH * (bc - wsi)
+        for i, wi in enumerate(wis):                
             wxi, wsi = wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX)   
-            #~ print  "expected ", X(self._g,self._p0)          
-            #~ print  "res ", wxi[3:,:].dot(self._p0) +  wsi[3:]           
-            A[i*dimH : (i+1)*dimH, : ]  = mH.dot(wxi) #constant part of A, Ac = Ac * wxi
-            b[i*dimH : (i+1)*dimH    ]  = bc - mH.dot(wsi)
+            A[i*dimH : (i+1)*dimH, : ]  = mH_TT.dot(wxi) #constant part of A, Ac = Ac * wxi
+            b[i*dimH : (i+1)*dimH    ]  = mH.dot(bc - wsi * TTm1)
             
             #~ print "point ok ?"
             #~ print ((mH.dot(wxi)).dot(self._p0) + (mH.dot(wsi)) - bc <=0.).all()
@@ -227,13 +231,13 @@ class BezierZeroStepCapturability(object):
         #~ print (self.__Ain.dot(self._p0) - self.__Aub <=0.).all()
         
         
-    def can_I_stop(self, c0=None, dc0=None, T_0=None, MAX_ITER=None):
+    def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None):
         ''' Determine whether the system can come to a stop without changing contacts.
             Keyword arguments:
               c0 -- initial CoM position 
               dc0 -- initial CoM velocity 
               
-              T_0 -- an initial guess for the time to stop
+              T -- the EXACT given time to stop
             Output: An object containing the following member variables:
               is_stable -- boolean value
               c -- final com position
@@ -242,7 +246,10 @@ class BezierZeroStepCapturability(object):
               t -- [WARNING] always 1 (Bezier curve)
               computation_time -- time taken to solve all the LPs
         '''        
-        if T_0 != None or MAX_ITER !=None:
+        if T <=0.:
+            raise ValueError('T cannot be lesser than 0')
+            print "\n *** [WARNING] In bezier step capturability: you set a T_0 or MAX_ITER value, but they are not used by the algorithm"
+        if MAX_ITER !=None:
             print "\n *** [WARNING] In bezier step capturability: you set a T_0 or MAX_ITER value, but they are not used by the algorithm"
         if(c0 is not None):
             assert np.asarray(c0).squeeze().shape[0]==3, "CoM has not size 3"
@@ -265,6 +272,7 @@ class BezierZeroStepCapturability(object):
                 '''
         # for the moment c is random stuff
         c = ones(3);
+        self.compute_6d_control_point_inequalities(T)
         (status, x, y) = self._solver.solve(c, lb= -100 * ones(3), ub = 100 * ones(3), A_in=self.__Ain, Alb=-100000* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
         
@@ -359,16 +367,25 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         print "dc", dc0.T;
         
     stabilitySolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
-    try:
-        res = stabilitySolver.can_I_stop();
-    except Exception as e:
-        print "\n *** New algorithm failed:", e,"\nRe-running the algorithm with high verbosity\n"
-        stabilitySolver._verb = 1;
-        try:
-            res = stabilitySolver.can_I_stop();
-        except Exception as e:
-            raise
-        
+    window_times = [1]+ [0.2*i for i in range(1,11)] #try nominal time first
+    #~ res = None
+    #~ try:
+    found = False
+    for i, el in enumerate(window_times):
+        if (found):
+            continue
+        res = stabilitySolver.can_I_stop(T=el);
+        if (res.is_stable):
+            found = True
+            if i != 0:
+                print "Failed to stop at 1, but managed to stop at ", el
+    #~ except ValueError as e:
+        #~ print e
+    #~ except Exception as e:
+        #~ print "\n *** New algorithm failed:", e,"\nRe-running the algorithm with high verbosity\n"
+    
+    print "out"
+    
     try:
         (has_stopped2, c_final2, dc_final2,t) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
         if((res.is_stable != has_stopped2)):  
@@ -377,7 +394,8 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
             print "\nERROR: the two algorithms gave different results!"
             print "New algorithm:", res.is_stable, res.c, res.dc;
             print "Old algorithm:", has_stopped2, c_final2, dc_final2;
-            print "Errors:", norm(res.c-c_final2), norm(res.dc-dc_final2), "\n";
+            if has_stopped2:
+                print "time of stop in old alg", t, "\n";
     except Exception as e:
         print "\n\n *** Old algorithm failed: ", e
         print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
@@ -417,8 +435,8 @@ if __name__=="__main__":
     print "% of total_disagree", 100. * float(total_disagree) / num_tested
     print "% of wins", 100. * float(mine_won) / total_disagree
     print "% of lose", 100. * float(mine_lose) / total_disagree
-    print "times of disagreement\n ", times_disagree
-    print "times of agreement\n ", times_agree_stop
+    #~ print "times of disagreement\n ", times_disagree
+    #~ print "times of agreement\n ", times_agree_stop
     #~ N_CONTACTS = 2;
     #~ SOLVER = 'cvxopt'; # cvxopt    
     #~ SOLVER = 'qpoases' # scipy
