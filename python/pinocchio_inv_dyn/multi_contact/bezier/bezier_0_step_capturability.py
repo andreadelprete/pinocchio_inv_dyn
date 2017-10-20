@@ -60,12 +60,12 @@ def compute_CWC(p, N, mass, mu):
     return np.squeeze(np.asarray(-H))
 
 def compute_w(c, ddc, dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81])):
-	w1 = m * (ddc - g_vec)
-	return array(w1.tolist() + (X(c, w1) + dL).tolist())
+    w1 = m * (ddc - g_vec)
+    return array(w1.tolist() + (X(c, w1) + dL).tolist())
 
 def is_stable(H,c=array([0.,0.,0.]), ddc=array([0.,0.,0.]), dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81]), robustness = 0.):
-	w = compute_w(c, ddc, dL, m, g_vec)	
-	return (H.dot(w)<=-robustness).all()
+    w = compute_w(c, ddc, dL, m, g_vec) 
+    return (H.dot(w)<=-robustness).all()
 
 def skew(x):
     res = zeros([3,3])
@@ -128,6 +128,22 @@ def w4(p0, p1, g, p0X, p1X, gX):
     
 
 wis = [w0,w1,w2,w3,w4]
+
+def __check_trajectory(p0,p1,p2,p3,T,H, mass, g, resolution = 50):
+    wps = [p0,p1,p2,p3]; wps = matrix([pi.tolist() for pi in wps]).transpose()
+    #~ waypoints_a_order_2_t = matrix(wps).transpose()
+    c_t = bezier(wps)
+    ddc_t = c_t.compute_derivate(2)
+    def c_tT(t):
+        return asarray(c_t(t/T)).flatten()
+    def ddc_tT(t):
+        return 1./(T*T) * asarray(ddc_t(t/T)).flatten()
+    for i in range(resolution):
+        t = T * float(i) / float(resolution)
+        if not (is_stable(H,c=c_tT(t), ddc=ddc_tT(t), dL=array([0.,0.,0.]), m = mass, g_vec=g, robustness = 10.)):
+            raise ValueError("trajectory is not stale !")
+        
+        
 
 class BezierZeroStepCapturability(object):
     _name = ""
@@ -368,6 +384,7 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         
     stabilitySolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
     window_times = [1]+ [0.2*i for i in range(1,11)] #try nominal time first
+    #~ window_times = [1]
     #~ res = None
     #~ try:
     found = False
@@ -377,6 +394,9 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         res = stabilitySolver.can_I_stop(T=el);
         if (res.is_stable):
             found = True
+            print "T", el
+            __check_trajectory(stabilitySolver._p0, stabilitySolver._p1, res.c, res.c, el, stabilitySolver._H, 
+                               stabilitySolver._mass, stabilitySolver._g, resolution = -0)
             if i != 0:
                 print "Failed to stop at 1, but managed to stop at ", el
     #~ except ValueError as e:
@@ -387,7 +407,8 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     print "out"
     
     try:
-        (has_stopped2, c_final2, dc_final2,t) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
+        t = -1
+        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
         if((res.is_stable != has_stopped2)):  
             #~ or not np.allclose(res.c, c_final2, atol=1e-3))  :
             #~ or not np.allclose(res.dc, dc_final2, atol=1e-3)):
@@ -396,6 +417,8 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
             print "Old algorithm:", has_stopped2, c_final2, dc_final2;
             if has_stopped2:
                 print "time of stop in old alg", t, "\n";
+            else:
+                print "start point",  c0, "\n";
     except Exception as e:
         print "\n\n *** Old algorithm failed: ", e
         print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
