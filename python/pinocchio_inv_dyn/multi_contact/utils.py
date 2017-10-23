@@ -69,6 +69,12 @@ def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
     return (A, G);
 
 
+def check_static_eq(H, h, mass, c0, g_vector):
+    w = np.zeros(6);
+    w[2] = -mass*9.81;
+    w[3:] = mass*np.cross(c0, g_vector);
+    return np.max(np.dot(H, w) - h) <= 1e-12;
+
 def find_static_equilibrium_com(mass, com_lb, com_ub, H, h, MAX_ITER=1000):
     ''' Find a position of the center of mass that is in static equilibrium.'''
     FOUND_STATIC_COM = False;
@@ -298,7 +304,7 @@ def can_I_stop(c0, dc0, contact_points, contact_normals, mu, mass, T_0, MAX_ITER
         A_red, d = eliminate_redundant_inequalities(np.vstack([a,b]).T, d);
         a = A_red[:,0];
         b = A_red[:,1];
-	
+    
     # Normalize inequalities to have unitary coefficients for DDalpha: b*DDalpha <= d - a*alpha
     for i in range(a.shape[0]):
         if(abs(b[i]) > EPS):

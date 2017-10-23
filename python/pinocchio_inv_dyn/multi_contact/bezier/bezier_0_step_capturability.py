@@ -7,7 +7,7 @@ Created on Thu Sep  1 16:54:39 2016
 
 from pinocchio_inv_dyn.optimization.solver_LP_abstract import LP_status, LP_status_string
 #~ from pinocchio_inv_dyn.sot_utils import qpOasesSolverMsg
-#~ from pinocchio_inv_dyn.multi_contact.stability_criterion import  Bunch, EPS
+from pinocchio_inv_dyn.multi_contact.stability_criterion import  Bunch
 from pinocchio_inv_dyn.optimization.solver_LP_abstract import getNewSolver
 
 from spline import bezier, bezier6, polynom
@@ -25,21 +25,21 @@ np.set_printoptions(precision=2, suppress=True, linewidth=100);
 from centroidal_dynamics import *
 
 __EPS = 1e-5;
-
-class Bunch:
-    def __init__(self, **kwds):
-        self.__dict__.update(kwds);
-
-    def __str__(self, prefix=""):
-        res = "";
-        for (key,value) in self.__dict__.iteritems():
-            if (isinstance(value, np.ndarray) and len(value.shape)==2 and value.shape[0]>value.shape[1]):
-                res += prefix+" - " + key + ": " + str(value.T) + "\n";
-            elif (isinstance(value, Bunch)):
-                res += prefix+" - " + key + ":\n" + value.__str__(prefix+"    ") + "\n";
-            else:
-                res += prefix+" - " + key + ": " + str(value) + "\n";
-        return res[:-1];
+#~ 
+#~ class Bunch:
+    #~ def __init__(self, **kwds):
+        #~ self.__dict__.update(kwds);
+#~ 
+    #~ def __str__(self, prefix=""):
+        #~ res = "";
+        #~ for (key,value) in self.__dict__.iteritems():
+            #~ if (isinstance(value, np.ndarray) and len(value.shape)==2 and value.shape[0]>value.shape[1]):
+                #~ res += prefix+" - " + key + ": " + str(value.T) + "\n";
+            #~ elif (isinstance(value, Bunch)):
+                #~ res += prefix+" - " + key + ":\n" + value.__str__(prefix+"    ") + "\n";
+            #~ else:
+                #~ res += prefix+" - " + key + ": " + str(value) + "\n";
+        #~ return res[:-1];
 
 ## 
 #  Given a list of contact points
@@ -87,42 +87,42 @@ def normalize(A,b):
             b[i] = b[i] / n_A
     return A, b
        
-def w0(p0, p1, g, p0X, p1X, gX):
+def w0(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
-    wx[:3,:] = 6*identity(3);  wx[3:,:] = 6*p0X;
-    ws[:3]   = 6*(p0 - 2*p1) 
-    ws[3:]   = X(-p0, 12*p1 + g ) 
+    wx[:3,:] = 6*alpha*identity(3);  wx[3:,:] = 6*alpha*p0X;
+    ws[:3]   = 6*alpha*(p0 - 2*p1) 
+    ws[3:]   = X(-p0, 12*alpha*p1 + g ) 
     return  wx, ws
     
-def w1(p0, p1, g, p0X, p1X, gX):
+def w1(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
-    wx[:3,:] = 3*identity(3);  
-    wx[3:,:] = skew(1.5 * (3*p1 - p0))
-    ws[:3]   =  1.5 * (3*p0 - 5*p1);
-    ws[3:]   = X(3*p0, -p1) + 0.25 * (gX.dot(3*p1 + p0)) 
+    wx[:3,:] = 3*alpha*identity(3);  
+    wx[3:,:] = skew(1.5 * (3*p1 - p0))*alpha
+    ws[:3]   =  1.5 *alpha* (3*p0 - 5*p1);
+    ws[3:]   = X(3*alpha*p0, -p1) + 0.25 * (gX.dot(3*p1 + p0)) 
     return  wx, ws
     
-def w2(p0, p1, g, p0X, p1X, gX):
+def w2(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
     #~ wx[:3,:] = 0;  
-    wx[3:,:] = skew(0.5*g - 3* p0 + 3*p1)
-    ws[:3]   =  3*(p0 - p1);
+    wx[3:,:] = skew(0.5*g - 3*alpha* p0 + 3*alpha*p1)
+    ws[:3]   =  3*alpha*(p0 - p1);
     ws[3:]   = 0.5 * gX.dot(p1) 
     return  wx, ws
     
-def w3(p0, p1, g, p0X, p1X, gX):
+def w3(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
-    wx[:3,:] = -3 * identity(3);  
-    wx[3:,:] = skew(g - 1.5 * (p1 + p0))
-    ws[:3]   = 1.5 * (p1 + p0) 
+    wx[:3,:] = -3*alpha* identity(3);  
+    wx[3:,:] = skew(g - 1.5 *alpha* (p1 + p0))
+    ws[:3]   = 1.5*alpha * (p1 + p0) 
     #~ ws[3:]   = 0 
     return  wx, ws
     
-def w4(p0, p1, g, p0X, p1X, gX):
+def w4(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
-    wx[:3,:] = -6 *identity(3);  
-    wx[3:,:] = skew(g - 6 * p1)
-    ws[:3]   = 6*p1 
+    wx[:3,:] = -6*alpha *identity(3);  
+    wx[3:,:] = skew(g - 6*alpha* p1)
+    ws[:3]   = 6*alpha*p1 
     #~ ws[3:]   = 0 
     return  wx, ws
     
@@ -140,7 +140,7 @@ def __check_trajectory(p0,p1,p2,p3,T,H, mass, g, resolution = 50):
         return 1./(T*T) * asarray(ddc_t(t/T)).flatten()
     for i in range(resolution):
         t = T * float(i) / float(resolution)
-        if not (is_stable(H,c=c_tT(t), ddc=ddc_tT(t), dL=array([0.,0.,0.]), m = mass, g_vec=g, robustness = 10.)):
+        if not (is_stable(H,c=c_tT(t), ddc=ddc_tT(t), dL=array([0.,0.,0.]), m = mass, g_vec=g, robustness = -0.00001)):
             raise ValueError("trajectory is not stale !")
         
         
@@ -187,17 +187,18 @@ class BezierZeroStepCapturability(object):
         self._gX  = skew(self._g )
 #        self._regularization    = regularization;
         self.set_contacts(contact_points, contact_normals, mu)
-        self.init_bezier(self._c0, self._dc0, 3)
+        #~ self.init_bezier(self._c0, self._dc0, 3)
+        self._kinematic_constraints = kinematic_constraints[:]
         
         self._solver = getNewSolver('qpoases', "name")
         #~ self._com_acc_solver  = ComAccLP(self._name+"_comAccLP", self._c0, self._v, self._contact_points, self._contact_normals, 
                                          #~ self._mu, self._g, self._mass, maxIter, verb-1, regularization, solver);
         #~ self._equilibrium_solver = RobustEquilibriumDLP(name+"_robEquiDLP", self._contact_points, self._contact_normals, 
                                                         #~ self._mu, self._g, self._mass, verb=verb-1);
-    def init_bezier(self, c0, dc0, n):
+    def init_bezier(self, c0, dc0, n, T =1.):
         self._n = n
         self._p0 = c0[:]
-        self._p1 = dc0 / n +  self._p0  
+        self._p1 = dc0 * T / n +  self._p0  
         self._p0X = skew(c0)
         self._p1X = skew(self._p1)
         #~ self.compute_6d_control_point_inequalities()
@@ -225,23 +226,32 @@ class BezierZeroStepCapturability(object):
             On the 6d curves, Ain x <= Aub
         '''        
         global wis
+        self.init_bezier(self._c0, self._dc0, 3, T)
         dimH  = self._H.shape[0]
         mH    = self._mass *self._H 
-        TTm1 = 1 / (T*T)
-        mH_TT = mH / TTm1
-        A = zeros([dimH * len(wis),3]) 
-        b = zeros(dimH * len(wis))
+        #~ TTm1 = 1 / (T*T)
+        alpha = 1 / (T*T)
+        #~ mH_TT = mH * TTm1
+        dim_kin = 0
+        if self._kinematic_constraints != None:
+            dim_kin = self._kinematic_constraints[0].shape[0]
+        A = zeros([dimH * len(wis)+dim_kin,3]) 
+        b = zeros(dimH * len(wis)+ dim_kin)
         bc = np.concatenate([self._g,zeros(3)])  #constant part of Aub, Aubi = mH * (bc - wsi)
-        #~ bc = mH.dot(np.concatenate([self._g,zeros(3)]))  #constant part of Aub, Aubi = mH * (bc - wsi)
+        #~ bc = TTm1 * np.concatenate([self._g,zeros(3)])  #constant part of Aub, Aubi = mH * (bc - wsi)
         for i, wi in enumerate(wis):                
-            wxi, wsi = wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX)   
-            A[i*dimH : (i+1)*dimH, : ]  = mH_TT.dot(wxi) #constant part of A, Ac = Ac * wxi
-            b[i*dimH : (i+1)*dimH    ]  = mH.dot(bc - wsi * TTm1)
+            wxi, wsi = wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX, alpha)   
+            A[i*dimH : (i+1)*dimH, : ]  = mH.dot(wxi) #constant part of A, Ac = Ac * wxi
+            b[i*dimH : (i+1)*dimH    ]  = mH.dot(bc - wsi)
             
             #~ print "point ok ?"
             #~ print ((mH.dot(wxi)).dot(self._p0) + (mH.dot(wsi)) - bc <=0.).all()
             #~ print ((self._mass *self._H.dot(wxi)).dot(self._p0) + (self._mass *self._H.dot(wsi)) - self._mass *self._H.dot(self._g) <=0.).all()
         #~ print 'are  they all ok ?'
+        #adding kinematic constraints        
+        if self._kinematic_constraints != None:
+            A[-dim_kin:,:] = self._kinematic_constraints[0][:]
+            b[-dim_kin:] =  self._kinematic_constraints[1][:]
         A, b = normalize(A,b)
         self.__Ain = A[:]; self.__Aub = b[:]
         #~ print (self.__Ain.dot(self._p0) - self.__Aub <=0.).all()
@@ -259,7 +269,7 @@ class BezierZeroStepCapturability(object):
               c -- final com position
               dc -- final com velocity. [WARNING] if is_stable is False, not used
               ddc_min -- [WARNING] Not relevant (used)
-              t -- [WARNING] always 1 (Bezier curve)
+              t -- always T (Bezier curve)
               computation_time -- time taken to solve all the LPs
         '''        
         if T <=0.:
@@ -287,13 +297,29 @@ class BezierZeroStepCapturability(object):
             dual solution
                 '''
         # for the moment c is random stuff
-        c = ones(3);
+        c = zeros(3);c[2] = -1
         self.compute_6d_control_point_inequalities(T)
         (status, x, y) = self._solver.solve(c, lb= -100 * ones(3), ub = 100 * ones(3), A_in=self.__Ain, Alb=-100000* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
+        wps = [self._p0,self._p1,x,x]; wps = matrix([pi.tolist() for pi in wps]).transpose()
+        c_of_s = bezier(wps)
+        dc_of_s = c_of_s.compute_derivate(1)
+        ddc_of_s = c_of_s.compute_derivate(2)
+        def c_of_t(curve):
+            def _eval(t):
+                return  asarray(curve(t/T)).flatten()
+            return _eval
+        def dc_of_t(curve):
+            def _eval(t):
+                return  1/T * asarray(curve(t/T)).flatten()
+            return _eval
+        def ddc_of_t(curve):
+            def _eval(t):
+                return  1/(T*T) * asarray(curve(t/T)).flatten()
+            return _eval
         
         return Bunch(is_stable=status==LP_status.LP_STATUS_OPTIMAL, c=x, dc=zeros(3), 
-                             computation_time=-1, ddc_min=0.0);
+                             computation_time=-1, ddc_min=0.0, t = T, c_of_t = c_of_t(c_of_s), dc_of_t = dc_of_t(dc_of_s), ddc_of_t = c_of_t(ddc_of_s));
 
     def predict_future_state(self, t_pred, c0=None, dc0=None, MAX_ITER=1000):
         ''' Compute what the CoM state will be at the specified time instant if the system
@@ -309,12 +335,11 @@ class BezierZeroStepCapturability(object):
         '''
         raise NotImplementedError('predict_future_state is not implemted so far.')
     
-    
+from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, can_I_stop, check_static_eq
 def test(N_CONTACTS = 2, solver='qpoases', verb=0):
-    from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, can_I_stop
+    
     DO_PLOTS = False;
     PLOT_3D = False;
-    mass = 75;             # mass of the robot
     mu = 0.5;           # friction coefficient
     lx = 0.1;           # half foot size in x direction
     ly = 0.07;          # half foot size in y direction
@@ -325,7 +350,8 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     RPY_LOWER_BOUNDS = [-2*gamma, -2*gamma, -pi];
     RPY_UPPER_BOUNDS = [+2*gamma, +2*gamma, +pi];
     MIN_CONTACT_DISTANCE = 0.3;
-    g_vector = np.array([0., 0., -9.81]);
+    global mass
+    global g_vector
     X_MARG = 0.07;
     Y_MARG = 0.07;
     
@@ -339,50 +365,18 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         Y_UB = np.max(p[:,1]+Y_MARG);
         Z_LB = np.min(p[:,2]-0.05);
         Z_UB = np.max(p[:,2]+1.5);
-        (H,h) = compute_GIWC(p, N, mu, False);
+        (H,h) = compute_GIWC(p, N, mu, False);     
         (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
         
     dc0 = np.random.uniform(-1, 1, size=3); 
-    #~ dc0[:] = 0;
     
-    if(DO_PLOTS):
-        f, ax = plut.create_empty_figure();
-        for j in range(p.shape[0]):
-            ax.scatter(p[j,0], p[j,1], c='k', s=100);
-        ax.scatter(c0[0], c0[1], c='r', s=100);
-        com_x = np.zeros(2);
-        com_y = np.zeros(2);
-        com_x[0] = c0[0]; 
-        com_y[0] = c0[1];
-        com_x[1] = c0[0]+dc0[0]; 
-        com_y[1] = c0[1]+dc0[1];
-        ax.plot(com_x, com_y, color='b');
-        plt.axis([X_LB,X_UB,Y_LB,Y_UB]);           
-        plt.title('Contact Points and CoM position'); 
-        
-    if(PLOT_3D):
-        from mpl_toolkits.mplot3d import axes3d, Axes3D
-        fig = plt.figure(figsize=plt.figaspect(0.5)*1.5)
-        ax = Axes3D(fig)
-#        ax = fig.gca(projection='3d')
-        line_styles =["b", "r", "c", "g"];
-        ss = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3];
-        ax.scatter(c0[0],c0[1],c0[2], c='k', marker='o');
-        for i in range(p.shape[0]):
-            ax.scatter(p[i,0],p[i,1],p[i,2], c=line_styles[i%len(line_styles)], marker='o');
-            for s in ss:
-                ax.scatter(p[i,0]+s*N[i,0],p[i,1]+s*N[i,1],p[i,2]+s*N[i,2], c=line_styles[i%len(line_styles)], marker='x');
-        for s in ss:
-            ax.scatter(c0[0]+s*dc0[0],c0[1]+s*dc0[1],c0[2]+s*dc0[2], c='k', marker='x');
-        ax.set_xlabel('x'); ax.set_ylabel('y'); ax.set_zlabel('z');
-   
-    if(verb>0):
-        print "p:", p.T;
-        print "N", N.T;
-        print "c", c0.T;
-        print "dc", dc0.T;
-        
-    stabilitySolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
+    Z_MIN = np.max(p[:,2])+0.1;
+    Ineq_kin = zeros([3,3]); Ineq_kin[2,2] = -1
+    ineq_kin = zeros(3); ineq_kin[2] = -Z_MIN
+    
+    
+    bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = [Ineq_kin,ineq_kin ]);
+    stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
     window_times = [1]+ [0.2*i for i in range(1,11)] #try nominal time first
     #~ window_times = [1]
     #~ res = None
@@ -391,12 +385,11 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     for i, el in enumerate(window_times):
         if (found):
             continue
-        res = stabilitySolver.can_I_stop(T=el);
+        res = bezierSolver.can_I_stop(T=el);
         if (res.is_stable):
             found = True
-            print "T", el
-            __check_trajectory(stabilitySolver._p0, stabilitySolver._p1, res.c, res.c, el, stabilitySolver._H, 
-                               stabilitySolver._mass, stabilitySolver._g, resolution = -0)
+            __check_trajectory(bezierSolver._p0, bezierSolver._p1, res.c, res.c, el, bezierSolver._H, 
+                               bezierSolver._mass, bezierSolver._g, resolution = 50)
             if i != 0:
                 print "Failed to stop at 1, but managed to stop at ", el
     #~ except ValueError as e:
@@ -404,53 +397,77 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     #~ except Exception as e:
         #~ print "\n *** New algorithm failed:", e,"\nRe-running the algorithm with high verbosity\n"
     
-    print "out"
+    #~ print "out"
     
     try:
-        t = -1
-        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
-        if((res.is_stable != has_stopped2)):  
+        res2 = stabilitySolver.can_I_stop();
+        #~ Bunch(is_stable, c=s, dc=Dalpha*self._v, t ,computation_time=);
+        #~ (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
+        #~ if((res.is_stable != res2.is_stable)):  
             #~ or not np.allclose(res.c, c_final2, atol=1e-3))  :
             #~ or not np.allclose(res.dc, dc_final2, atol=1e-3)):
-            print "\nERROR: the two algorithms gave different results!"
-            print "New algorithm:", res.is_stable, res.c, res.dc;
-            print "Old algorithm:", has_stopped2, c_final2, dc_final2;
-            if has_stopped2:
-                print "time of stop in old alg", t, "\n";
-            else:
-                print "start point",  c0, "\n";
+            #~ print "\nERROR: the two algorithms gave different results!"
+            #~ print "New algorithm:", res.is_stable, res.c, res.dc;
+            #~ print "Old algorithm:", res2.is_stable, res.c, res2.dc;
+            #~ if res2.is_stable:
+                #~ print "time of stop in old alg", res2.t, "\n";
+            #~ else:
+                #~ print "start point",  c0, "\n";
     except Exception as e:
-        print "\n\n *** Old algorithm failed: ", e
-        print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
+        pass
+        #~ print "\n\n *** Old algorithm failed: ", e
+        #~ print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
         
-    return res.is_stable, has_stopped2, t
+    
+    #~ print "H  res test", H.shape 
+    return res.is_stable, res2.is_stable, res, res2, c0, dc0, H, h, p, N
     #~ return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
     #~ return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
         
 
-if __name__=="__main__":
+if __name__=="__main__":        
+    g_vector = np.array([0., 0., -9.81]);
+    mass = 75;             # mass of the robot
+    from pinocchio_inv_dyn.multi_contact.stability_criterion import  StabilityCriterion
+    from matplotlib import rcParams
+    rcParams.update({'font.size': 11})
     mine_won = 0
     mine_lose = 0
     total_stop = 0
     total_not_stop = 0
     total_disagree = 0
-    times_disagree = []
-    times_agree_stop = []
+    margin_i_win_he_lose = [] # remaining speed
+    margin_he_wins_i_lost = [] # remaining acceleration
+    curves_when_i_win = []
+    #~ times_disagree = []
+    #~ times_agree_stop = []
     
     num_tested = 0.
-    for i in range(1000):
+    for i in range(100):
         num_tested = i-1
-        mine, theirs, t = test()
+        mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test()
+        #~ print "H test", H.shape 
         if(mine != theirs):
             total_disagree+=1
-            times_disagree +=[t]
+            if(mine):
+                #~ times_disagree +=[r_mine.t]
+                margin_i_win_he_lose+=[r_theirs.dc]
+                curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
+                print "margin when he lost: ", norm(r_theirs.dc)
+            #~ else:
+                #~ times_disagree +=[r_theirs.t]
             if mine:
                 mine_won +=1
             else:
                 mine_lose +=1
         elif(mine or theirs):
             total_stop+=1
-            times_agree_stop+=[t]
+            #~ times_agree_stop+=[r_mine.t]
+            margin_he_wins_i_lost+=[r_theirs.ddc_min]
+            
+            #~ margin_i_win_he_lose+=[r_theirs.dc]
+            #~ curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
+            #~ print "margin when he wins: ", r_theirs.ddc_min
         else:
             total_not_stop+=1
                 
@@ -458,31 +475,113 @@ if __name__=="__main__":
     print "% of total_disagree", 100. * float(total_disagree) / num_tested
     print "% of wins", 100. * float(mine_won) / total_disagree
     print "% of lose", 100. * float(mine_lose) / total_disagree
-    #~ print "times of disagreement\n ", times_disagree
-    #~ print "times of agreement\n ", times_agree_stop
-    #~ N_CONTACTS = 2;
-    #~ SOLVER = 'cvxopt'; # cvxopt    
-    #~ SOLVER = 'qpoases' # scipy
-    #~ VERB = 0;
-    #~ N_TESTS = range(0,10);
-    #~ time    = np.zeros(len(N_TESTS));
-    #~ outIter = np.zeros(len(N_TESTS));
-    #~ inIter  = np.zeros(len(N_TESTS));
-    #~ # test 392 with 2 contacts give different results
-    #~ # test 264 with 3 contacts give different results
-    #~ j = 0;
-    #~ for i in N_TESTS:
-        #~ try:
-            #~ np.random.seed(i);
-            #~ (time[j], outIter[j], inIter[j]) = test(N_CONTACTS, SOLVER, verb=VERB);
-            #~ print "Test %3d, time %3.2f, outIter %3d, inIter %3d" % (i, 1e3*time[j], outIter[j], inIter[j]);
-            #~ j += 1;
-#~ #            ret = cProfile.run("test()");
-        #~ except Exception as e:
-            #~ print e;
-    #~ print "\nMean computation time %.3f" % (1e3*np.mean(time));
-    #~ print "Mean outer iterations %d" % (np.mean(outIter));
-    #~ print "Mean inner iterations %d" % (np.mean(inIter));
-    #~ print "\nMax computation time %.3f" % (1e3*np.max(time));
-    #~ print "Max outer iterations %d" % (np.max(outIter));
-    #~ print "Max inner iterations %d" % (np.max(inIter));
+    
+    from mpl_toolkits.mplot3d import Axes3D
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+            
+    def __plot_3d_points(ax, points, c = 'b'):
+        xs = [point[0] for point in points]
+        ys = [point[1] for point in points]
+        zs = [point[2] for point in points]
+        ax.scatter(xs[:1], ys[:1], zs[:1], c='r')		
+        ax.scatter(xs[1:-1], ys[1:-1], zs[1:-1], c=c)		
+        ax.scatter(xs[-1:], ys[-1:], zs[-1:], c='g')		
+        ax.set_xlabel('X Label', fontsize = 11)
+        ax.set_ylabel('Y Label', fontsize = 11)
+        ax.set_zlabel('Z Label', fontsize = 11)
+        
+    from pinocchio_inv_dyn.geom_utils import is_vector_inside_cone, plot_inequalities
+    def plot_support_polygon(H,h,p,N,ax, c0):
+        from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, find_static_equilibrium_com, compute_GIWC, compute_support_polygon
+        #~ (H,h) = compute_GIWC(p, N, mu);        
+        global mass
+        global g_vector
+        (B_sp, b_sp) = compute_support_polygon(H, h, mass, g_vector, eliminate_redundancies=False);
+        X_MIN = np.min(p[:,0]);
+        X_MAX = np.max(p[:,0]);
+        X_MIN -= 0.5*(X_MAX-X_MIN);
+        X_MAX += 0.5*(X_MAX-X_MIN);
+        Y_MIN = np.min(p[:,1]);
+        Y_MAX = np.max(p[:,1]);
+        Y_MIN -= 0.5*(Y_MAX-Y_MIN);
+        Y_MAX += 0.5*(Y_MAX-Y_MIN);
+        num_steps = 50
+        dx = (X_MAX - X_MIN) / float(num_steps)
+        dy = (Y_MAX - Y_MIN) / float(num_steps)
+        #~ points = [(X_MIN + dx * i, Y_MAX + dy * j, 0.) for i in range(num_steps+1) for j in range(num_steps+1) if check_static_eq(H, h, mass, array([X_MIN + dx * i, Y_MAX + dy * j,0.]), g_vector) ]
+        #~ points = [c0]+[[X_MIN + dx * i, Y_MIN + dy * j, -0.5] for i in range(num_steps+1) for j in range(num_steps+1) if check_static_eq(H, h, mass, [X_MIN + dx * i, Y_MAX + dy * j,0.], g_vector)]
+        points = [c0]+[[X_MIN + dx * i, Y_MIN + dy * j, 0] for i in range(num_steps+1) for j in range(num_steps+1) ]
+        pts2  = []
+        for pt in points:
+            if check_static_eq(H, h, mass, pt, g_vector):
+                pts2 += [pt]
+        __plot_3d_points(ax, pts2, c="r")   
+        #~ __plot_3d_points(ax, points2, c="r")   
+        __plot_3d_points(ax, p, c="r")   
+        #~ for i in range(num_steps):
+            #~ for j in range(num_steps):
+        #~ plot_inequalities(B_sp, b_sp, [X_MIN,X_MAX], [Y_MIN,Y_MAX], ax=ax, color='b', lw=4, is_3d=False);
+        #~ plot_inequalities(B_sp, b_sp, [X_MIN,X_MAX], [Y_MIN,Y_MAX], ax=ax, color='b', lw=4, is_3d=False);
+        #~ plt.show();
+    
+    def plot_win_curve(n = -1, num_pts = 20):
+        global curves_when_i_win
+        if n > len(curves_when_i_win) -1 or n < 0:
+            print "n bigger than num curves or equal to -1, plotting last curve"
+            n = len(curves_when_i_win) -1        
+        c0, dc0, c_end, dc_end, t_max, c_of_t, dc_of_t, ddc_of_t, H, h, p, N = curves_when_i_win[n]
+        print "c0 ", c0
+        print "Is c0 stable ? ", check_static_eq(H, h, mass, c0, g_vector)
+        print "Is end stable ? ", check_static_eq(H, h, mass, c_of_t(t_max), g_vector)
+        
+        w = np.zeros(6);
+        w[2] = -mass*9.81;
+        w[3:] = mass*np.cross(c_of_t(t_max), g_vector);
+        print 'max ', np.max(np.dot(H, w) - h)
+        
+        X_MIN = np.min(p[:,0]);
+        X_MAX = np.max(p[:,0]);
+        X_MIN -= 0.1*(X_MAX-X_MIN);
+        X_MAX += 0.1*(X_MAX-X_MIN);
+        Y_MIN = np.min(p[:,1]);
+        Y_MAX = np.max(p[:,1]);
+        print "Is XMIN ? ", X_MIN
+        print "Is XMAX ? ", X_MAX
+        print "Is YMIN ? ", Y_MIN
+        print "Is YMAX ? ", Y_MAX
+        delta = t_max / float(num_pts)
+        fig = plt.figure()	
+        ax = fig.add_subplot(221, projection='3d')
+        #~ ax = fig.add_subplot(221)
+        __plot_3d_points(ax, [c_of_t(i * delta) for i in range(num_pts)])
+        __plot_3d_points(ax, [c0 + (c_end-c0)* i * delta for i in range(num_pts)], c = "y")
+        plot_support_polygon(H,h,p,N,ax, c0)
+        ax = fig.add_subplot(222, projection='3d')
+        __plot_3d_points(ax, [dc_of_t(i * delta) for i in range(num_pts)])    
+        __plot_3d_points(ax, [dc0 + (dc_end-dc0)* i * delta for i in range(num_pts)], c = "y")    
+        ax = fig.add_subplot(223, projection='3d')
+        __plot_3d_points(ax, [ddc_of_t(i * delta) for i in range(num_pts)])
+        #~ ax = fig.add_subplot(224, projection='3d')
+        __plot_3d_points(ax, [-dc0* i * delta for i in range(num_pts)], c = "y")
+        #~ ax = fig.add_subplot(121, projection='3d')
+        #~ __plot_3d_points(ax, [ddc_of_t(i * delta) for i in range(num_pts)])
+        #~ ax = fig.add_subplot(122, projection='3d')
+        #~ __plot_3d_points(ax, [-dc0* i * delta for i in range(num_pts)])
+        print "cross product ", X(-dc0,ddc_of_t(0.5) - ddc_of_t(0) ) / norm(X(-dc0,ddc_of_t(0.5) - ddc_of_t(0) ))
+        print "init acceleration ", ddc_of_t(0)
+        print "init velocity ", dc_of_t(0)
+        print "end velocity ", dc_of_t(t_max)
+        #~ print "cross product ", X(-dc0,ddc_of_t(t_max) - ddc_of_t(0) ) / norm(X(-dc0,ddc_of_t(t_max) - ddc_of_t(0) ))
+        
+        #~ plt.show()
+        
+    def plot_n_win_curves(n = -1, num_pts = 50):
+        global curves_when_i_win
+        if n > len(curves_when_i_win) -1 or n < 0:
+            print "n bigger than num curves or equal to -1, plotting last curve"
+            n = len(curves_when_i_win) -1
+        for i in range(n):
+            plot_win_curve(i, num_pts)
+        plt.show()
+        
