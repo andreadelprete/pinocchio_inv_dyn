@@ -187,8 +187,10 @@ class BezierZeroStepCapturability(object):
         self._gX  = skew(self._g )
 #        self._regularization    = regularization;
         self.set_contacts(contact_points, contact_normals, mu)
-        #~ self.init_bezier(self._c0, self._dc0, 3)
-        self._kinematic_constraints = kinematic_constraints[:]
+        if kinematic_constraints != None:
+            self._kinematic_constraints = kinematic_constraints[:]
+        else:
+            self._kinematic_constraints = None
         
         self._solver = getNewSolver('qpoases', "name")
         #~ self._com_acc_solver  = ComAccLP(self._name+"_comAccLP", self._c0, self._v, self._contact_points, self._contact_normals, 
@@ -363,21 +365,22 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         X_UB = np.max(p[:,0]+X_MARG);
         Y_LB = np.min(p[:,1]-Y_MARG);
         Y_UB = np.max(p[:,1]+Y_MARG);
-        Z_LB = np.min(p[:,2]-0.05);
+        Z_LB = np.max(p[:,2]+0.5);
         Z_UB = np.max(p[:,2]+1.5);
         (H,h) = compute_GIWC(p, N, mu, False);     
         (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
         
     dc0 = np.random.uniform(-1, 1, size=3); 
     
-    Z_MIN = np.max(p[:,2])+0.1;
+    Z_MIN = np.max(p[:,2])-0.1;
     Ineq_kin = zeros([3,3]); Ineq_kin[2,2] = -1
     ineq_kin = zeros(3); ineq_kin[2] = -Z_MIN
     
     
     bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = [Ineq_kin,ineq_kin ]);
+    #~ bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
     stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
-    window_times = [1]+ [0.2*i for i in range(1,11)] #try nominal time first
+    window_times = [1]+ [0.1*i for i in range(1,22)] #try nominal time first
     #~ window_times = [1]
     #~ res = None
     #~ try:
@@ -443,7 +446,7 @@ if __name__=="__main__":
     #~ times_agree_stop = []
     
     num_tested = 0.
-    for i in range(100):
+    for i in range(200):
         num_tested = i-1
         mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test()
         #~ print "H test", H.shape 
@@ -465,16 +468,17 @@ if __name__=="__main__":
             #~ times_agree_stop+=[r_mine.t]
             margin_he_wins_i_lost+=[r_theirs.ddc_min]
             
-            #~ margin_i_win_he_lose+=[r_theirs.dc]
-            #~ curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
+            margin_i_win_he_lose+=[r_theirs.dc]
+            curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
             #~ print "margin when he wins: ", r_theirs.ddc_min
         else:
             total_not_stop+=1
-                
-    print "% of stops", 100. * float(total_stop) / num_tested
-    print "% of total_disagree", 100. * float(total_disagree) / num_tested
-    print "% of wins", 100. * float(mine_won) / total_disagree
-    print "% of lose", 100. * float(mine_lose) / total_disagree
+    
+    print "% of stops", 100. * float(total_stop) / num_tested, total_stop
+    print "% of total_disagree", 100. * float(total_disagree) / num_tested, total_disagree
+    if total_disagree > 0:
+        print "% of wins", 100. * float(mine_won) / total_disagree
+        print "% of lose", 100. * float(mine_lose) / total_disagree
     
     from mpl_toolkits.mplot3d import Axes3D
     import matplotlib.pyplot as plt
@@ -484,9 +488,9 @@ if __name__=="__main__":
         xs = [point[0] for point in points]
         ys = [point[1] for point in points]
         zs = [point[2] for point in points]
-        ax.scatter(xs[:1], ys[:1], zs[:1], c='r')		
-        ax.scatter(xs[1:-1], ys[1:-1], zs[1:-1], c=c)		
-        ax.scatter(xs[-1:], ys[-1:], zs[-1:], c='g')		
+        ax.scatter(xs[:1], ys[:1], zs[:1], c='r')       
+        ax.scatter(xs[1:-1], ys[1:-1], zs[1:-1], c=c)       
+        ax.scatter(xs[-1:], ys[-1:], zs[-1:], c='g')        
         ax.set_xlabel('X Label', fontsize = 11)
         ax.set_ylabel('Y Label', fontsize = 11)
         ax.set_zlabel('Z Label', fontsize = 11)
@@ -551,7 +555,7 @@ if __name__=="__main__":
         print "Is YMIN ? ", Y_MIN
         print "Is YMAX ? ", Y_MAX
         delta = t_max / float(num_pts)
-        fig = plt.figure()	
+        fig = plt.figure()  
         ax = fig.add_subplot(221, projection='3d')
         #~ ax = fig.add_subplot(221)
         __plot_3d_points(ax, [c_of_t(i * delta) for i in range(num_pts)])
