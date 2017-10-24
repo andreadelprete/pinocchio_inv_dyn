@@ -10,7 +10,7 @@ from pinocchio_inv_dyn.optimization.solver_LP_abstract import LP_status, LP_stat
 from pinocchio_inv_dyn.multi_contact.stability_criterion import  Bunch
 from pinocchio_inv_dyn.optimization.solver_LP_abstract import getNewSolver
 
-from spline import bezier, bezier6, polynom
+from spline import bezier, bezier6, polynom, bernstein
 
 from numpy import array, vstack, zeros, ones, sqrt, matrix, asmatrix, asarray, identity
 from numpy import cross as X
@@ -25,21 +25,6 @@ np.set_printoptions(precision=2, suppress=True, linewidth=100);
 from centroidal_dynamics import *
 
 __EPS = 1e-5;
-#~ 
-#~ class Bunch:
-    #~ def __init__(self, **kwds):
-        #~ self.__dict__.update(kwds);
-#~ 
-    #~ def __str__(self, prefix=""):
-        #~ res = "";
-        #~ for (key,value) in self.__dict__.iteritems():
-            #~ if (isinstance(value, np.ndarray) and len(value.shape)==2 and value.shape[0]>value.shape[1]):
-                #~ res += prefix+" - " + key + ": " + str(value.T) + "\n";
-            #~ elif (isinstance(value, Bunch)):
-                #~ res += prefix+" - " + key + ":\n" + value.__str__(prefix+"    ") + "\n";
-            #~ else:
-                #~ res += prefix+" - " + key + ": " + str(value) + "\n";
-        #~ return res[:-1];
 
 ## 
 #  Given a list of contact points
@@ -65,6 +50,7 @@ def compute_w(c, ddc, dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81]))
 
 def is_stable(H,c=array([0.,0.,0.]), ddc=array([0.,0.,0.]), dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81]), robustness = 0.):
     w = compute_w(c, ddc, dL, m, g_vec) 
+    print "rob,", np.max(H.dot(w))
     return (H.dot(w)<=-robustness).all()
 
 def skew(x):
@@ -92,7 +78,7 @@ def w0(p0, p1, g, p0X, p1X, gX, alpha):
     wx[:3,:] = 6*alpha*identity(3);  wx[3:,:] = 6*alpha*p0X;
     ws[:3]   = 6*alpha*(p0 - 2*p1) 
     ws[3:]   = X(-p0, 12*alpha*p1 + g ) 
-    return  wx, ws
+    return  (wx, ws)
     
 def w1(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
@@ -100,7 +86,7 @@ def w1(p0, p1, g, p0X, p1X, gX, alpha):
     wx[3:,:] = skew(1.5 * (3*p1 - p0))*alpha
     ws[:3]   =  1.5 *alpha* (3*p0 - 5*p1);
     ws[3:]   = X(3*alpha*p0, -p1) + 0.25 * (gX.dot(3*p1 + p0)) 
-    return  wx, ws
+    return  (wx, ws)
     
 def w2(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
@@ -108,7 +94,7 @@ def w2(p0, p1, g, p0X, p1X, gX, alpha):
     wx[3:,:] = skew(0.5*g - 3*alpha* p0 + 3*alpha*p1)
     ws[:3]   =  3*alpha*(p0 - p1);
     ws[3:]   = 0.5 * gX.dot(p1) 
-    return  wx, ws
+    return  (wx, ws)
     
 def w3(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
@@ -116,7 +102,7 @@ def w3(p0, p1, g, p0X, p1X, gX, alpha):
     wx[3:,:] = skew(g - 1.5 *alpha* (p1 + p0))
     ws[:3]   = 1.5*alpha * (p1 + p0) 
     #~ ws[3:]   = 0 
-    return  wx, ws
+    return  (wx, ws)
     
 def w4(p0, p1, g, p0X, p1X, gX, alpha):
     wx, ws = __init_6D()    
@@ -124,14 +110,19 @@ def w4(p0, p1, g, p0X, p1X, gX, alpha):
     wx[3:,:] = skew(g - 6*alpha* p1)
     ws[:3]   = 6*alpha*p1 
     #~ ws[3:]   = 0 
-    return  wx, ws
+    return  (wx, ws)
     
 
 wis = [w0,w1,w2,w3,w4]
+b4 = [bernstein(4,i) for i in range(5)]
 
-def __check_trajectory(p0,p1,p2,p3,T,H, mass, g, resolution = 50):
+def __check_trajectory(p0,p1,p2,p3,T,H, mass, g, time_step = 0.1):
+    robustness = -0.000001
+    if(time_step < 0):
+        time_step = 0.01
+        robustness = -0.00000001
+    resolution = int(T / time_step)
     wps = [p0,p1,p2,p3]; wps = matrix([pi.tolist() for pi in wps]).transpose()
-    #~ waypoints_a_order_2_t = matrix(wps).transpose()
     c_t = bezier(wps)
     ddc_t = c_t.compute_derivate(2)
     def c_tT(t):
@@ -190,34 +181,77 @@ class BezierZeroStepCapturability(object):
         if kinematic_constraints != None:
             self._kinematic_constraints = kinematic_constraints[:]
         else:
-            self._kinematic_constraints = None
-        
+            self._kinematic_constraints = None        
         self._solver = getNewSolver('qpoases', "name")
-        #~ self._com_acc_solver  = ComAccLP(self._name+"_comAccLP", self._c0, self._v, self._contact_points, self._contact_normals, 
-                                         #~ self._mu, self._g, self._mass, maxIter, verb-1, regularization, solver);
-        #~ self._equilibrium_solver = RobustEquilibriumDLP(name+"_robEquiDLP", self._contact_points, self._contact_normals, 
-                                                        #~ self._mu, self._g, self._mass, verb=verb-1);
+        
     def init_bezier(self, c0, dc0, n, T =1.):
         self._n = n
         self._p0 = c0[:]
         self._p1 = dc0 * T / n +  self._p0  
         self._p0X = skew(c0)
         self._p1X = skew(self._p1)
-        #~ self.compute_6d_control_point_inequalities()
-        
-        #~ print "checking static equilibrium is ok ..."
-        #~ print is_stable(self._H,c=self._p0, ddc=array([0.,0.,0.]), dL=array([0.,0.,0.]), m = self._mass, g_vec=self._g, robustness = 0.)
 
     def set_contacts(self, contact_points, contact_normals, mu):
         self._contact_points    = np.asarray(contact_points).copy();
         self._contact_normals   = np.asarray(contact_normals).copy();
         self._mu                = mu;
         self._H                 = compute_CWC(self._contact_points, self._contact_normals, self._mass, mu)#CWC inequality matrix
-        #~ self._com_acc_solver.set_contacts(contact_points, contact_normals, mu);
-        #~ self._equilibrium_solver = RobustEquilibriumDLP(self._name, contact_points, contact_normals, mu, self._g, self._mass, verb=self._verb);
         
         
-    def compute_6d_control_point_inequalities(self, T):
+    #~ def __compute_wixs(self, T, num_step = -1):        
+        #~ alpha = 1 / (T*T)
+        #~ wps = [wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX, alpha)  for wi in wis]
+        #~ if num_step > 0:
+            #~ dt = float(T/num_step)
+            #~ wps_bern = [ [ (b(i*dt)*wps[idx][0], b(i*dt)*wps[idx][1]) for idx,b in enumerate(b4)] for i in range(num_step + 1) ]
+            #~ wps = [reduce(lambda a, b : (a[0] + b[0], a[1] + b[1]), wps_bern_i) for wps_bern_i in wps_eval]
+        #~ return wps
+        
+        
+    def __compute_wixs(self, T, num_step = -1):        
+        alpha = 1 / (T*T)
+        wps = [wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX, alpha)  for wi in wis]
+        if num_step > 0:
+            dt = (float(T)/num_step)
+            res = []
+            for i in range(num_step+1):
+                (wxres, wsres) = (zeros([6,3]),zeros(6))
+                for j in range(0,5):
+                    (wxi, wsi) = wps[j]
+                    bi = b4[j](i*dt)
+                    wxres += wxi * bi
+                    wsres += wsi * bi
+                res +=[(wxres, wsres)]
+            return res
+            #~ wps_bern = [ [ (b(i*dt)*wps[idx][0], b(i*dt)*wps[idx][1]) for idx,b in enumerate(b4)] for i in range(num_step + 1) ]
+            #~ wps = [reduce(lambda a, b : (a[0] + b[0], a[1] + b[1]), wps_bern_i) for wps_bern_i in wps_eval]
+        return wps
+        
+    def __add_kinematic_and_normalize(self,A,b):        
+        if self._kinematic_constraints != None:
+            dim_kin = self._kinematic_constraints[0].shape[0]
+            A[-dim_kin:,:] = self._kinematic_constraints[0][:]
+            b[-dim_kin:] =  self._kinematic_constraints[1][:]
+        A, b = normalize(A,b)
+        self.__Ain = A[:]; self.__Aub = b[:]
+        
+    def _compute_num_steps(self, T, time_step):    
+        num_steps = -1    
+        if(time_step > 0):
+            num_steps = int(T / time_step)
+        return num_steps
+        
+    def _init_matrices_A_b(self, wps):    
+        dim_kin = 0
+        dimH  = self._H.shape[0]
+        if self._kinematic_constraints != None:
+            dim_kin = self._kinematic_constraints[0].shape[0]
+        A = zeros([dimH * len(wps)+dim_kin,3]) 
+        b = zeros(dimH * len(wps)+ dim_kin)
+        return A,b
+        
+    
+    def compute_6d_control_point_inequalities(self, T, time_step = -1.):
         ''' compute the inequality methods that determine the 6D bezier curve w(t)
             as a function of a variable waypoint for the 3D COM trajectory.
             The initial curve is of degree 3 (init pos and velocity, 0 velocity constraints + one free variable).
@@ -227,39 +261,20 @@ class BezierZeroStepCapturability(object):
             Stacking all of these results in a big inequality matrix A and a column vector x that determines the constraints
             On the 6d curves, Ain x <= Aub
         '''        
-        global wis
         self.init_bezier(self._c0, self._dc0, 3, T)
         dimH  = self._H.shape[0]
-        mH    = self._mass *self._H 
-        #~ TTm1 = 1 / (T*T)
-        alpha = 1 / (T*T)
-        #~ mH_TT = mH * TTm1
-        dim_kin = 0
-        if self._kinematic_constraints != None:
-            dim_kin = self._kinematic_constraints[0].shape[0]
-        A = zeros([dimH * len(wis)+dim_kin,3]) 
-        b = zeros(dimH * len(wis)+ dim_kin)
+        mH    = self._mass *self._H         
+        num_steps = self._compute_num_steps(T, time_step) 
+        wps = self.__compute_wixs(T ,num_steps)
+        A,b = self._init_matrices_A_b(wps)
         bc = np.concatenate([self._g,zeros(3)])  #constant part of Aub, Aubi = mH * (bc - wsi)
-        #~ bc = TTm1 * np.concatenate([self._g,zeros(3)])  #constant part of Aub, Aubi = mH * (bc - wsi)
-        for i, wi in enumerate(wis):                
-            wxi, wsi = wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX, alpha)   
+        for i, (wxi, wsi) in enumerate(wps):        
             A[i*dimH : (i+1)*dimH, : ]  = mH.dot(wxi) #constant part of A, Ac = Ac * wxi
             b[i*dimH : (i+1)*dimH    ]  = mH.dot(bc - wsi)
-            
-            #~ print "point ok ?"
-            #~ print ((mH.dot(wxi)).dot(self._p0) + (mH.dot(wsi)) - bc <=0.).all()
-            #~ print ((self._mass *self._H.dot(wxi)).dot(self._p0) + (self._mass *self._H.dot(wsi)) - self._mass *self._H.dot(self._g) <=0.).all()
-        #~ print 'are  they all ok ?'
-        #adding kinematic constraints        
-        if self._kinematic_constraints != None:
-            A[-dim_kin:,:] = self._kinematic_constraints[0][:]
-            b[-dim_kin:] =  self._kinematic_constraints[1][:]
-        A, b = normalize(A,b)
-        self.__Ain = A[:]; self.__Aub = b[:]
-        #~ print (self.__Ain.dot(self._p0) - self.__Aub <=0.).all()
+        self.__add_kinematic_and_normalize(A,b)
         
         
-    def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None):
+    def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None, time_step = -1):
         ''' Determine whether the system can come to a stop without changing contacts.
             Keyword arguments:
               c0 -- initial CoM position 
@@ -300,7 +315,7 @@ class BezierZeroStepCapturability(object):
                 '''
         # for the moment c is random stuff
         c = zeros(3);c[2] = -1
-        self.compute_6d_control_point_inequalities(T)
+        self.compute_6d_control_point_inequalities(T, time_step)
         (status, x, y) = self._solver.solve(c, lb= -100 * ones(3), ub = 100 * ones(3), A_in=self.__Ain, Alb=-100000* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
         wps = [self._p0,self._p1,x,x]; wps = matrix([pi.tolist() for pi in wps]).transpose()
@@ -365,7 +380,7 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         X_UB = np.max(p[:,0]+X_MARG);
         Y_LB = np.min(p[:,1]-Y_MARG);
         Y_UB = np.max(p[:,1]+Y_MARG);
-        Z_LB = np.max(p[:,2]+0.5);
+        Z_LB = np.max(p[:,2]+0.3);
         Z_UB = np.max(p[:,2]+1.5);
         (H,h) = compute_GIWC(p, N, mu, False);     
         (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
@@ -382,17 +397,18 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
     window_times = [1]+ [0.1*i for i in range(1,22)] #try nominal time first
     #~ window_times = [1]
-    #~ res = None
-    #~ try:
     found = False
+    time_step_check = 0.1
     for i, el in enumerate(window_times):
         if (found):
-            continue
-        res = bezierSolver.can_I_stop(T=el);
+            break
+        res = bezierSolver.can_I_stop(T=el, time_step = time_step_check);
+        #~ res = bezierSolver.can_I_stop(T=el, time_step = -1);
         if (res.is_stable):
             found = True
+            print "found at ", el
             __check_trajectory(bezierSolver._p0, bezierSolver._p1, res.c, res.c, el, bezierSolver._H, 
-                               bezierSolver._mass, bezierSolver._g, resolution = 50)
+                               bezierSolver._mass, bezierSolver._g, time_step = time_step_check)
             if i != 0:
                 print "Failed to stop at 1, but managed to stop at ", el
     #~ except ValueError as e:
@@ -404,28 +420,13 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     
     try:
         res2 = stabilitySolver.can_I_stop();
-        #~ Bunch(is_stable, c=s, dc=Dalpha*self._v, t ,computation_time=);
-        #~ (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
-        #~ if((res.is_stable != res2.is_stable)):  
-            #~ or not np.allclose(res.c, c_final2, atol=1e-3))  :
-            #~ or not np.allclose(res.dc, dc_final2, atol=1e-3)):
-            #~ print "\nERROR: the two algorithms gave different results!"
-            #~ print "New algorithm:", res.is_stable, res.c, res.dc;
-            #~ print "Old algorithm:", res2.is_stable, res.c, res2.dc;
-            #~ if res2.is_stable:
-                #~ print "time of stop in old alg", res2.t, "\n";
-            #~ else:
-                #~ print "start point",  c0, "\n";
     except Exception as e:
         pass
         #~ print "\n\n *** Old algorithm failed: ", e
         #~ print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
         
     
-    #~ print "H  res test", H.shape 
     return res.is_stable, res2.is_stable, res, res2, c0, dc0, H, h, p, N
-    #~ return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
-    #~ return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
         
 
 if __name__=="__main__":        
@@ -446,7 +447,7 @@ if __name__=="__main__":
     #~ times_agree_stop = []
     
     num_tested = 0.
-    for i in range(200):
+    for i in range(100):
         num_tested = i-1
         mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test()
         #~ print "H test", H.shape 
@@ -468,8 +469,8 @@ if __name__=="__main__":
             #~ times_agree_stop+=[r_mine.t]
             margin_he_wins_i_lost+=[r_theirs.ddc_min]
             
-            margin_i_win_he_lose+=[r_theirs.dc]
-            curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
+            #~ margin_i_win_he_lose+=[r_theirs.dc]
+            #~ curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
             #~ print "margin when he wins: ", r_theirs.ddc_min
         else:
             total_not_stop+=1
@@ -572,8 +573,8 @@ if __name__=="__main__":
         #~ __plot_3d_points(ax, [ddc_of_t(i * delta) for i in range(num_pts)])
         #~ ax = fig.add_subplot(122, projection='3d')
         #~ __plot_3d_points(ax, [-dc0* i * delta for i in range(num_pts)])
-        print "cross product ", X(-dc0,ddc_of_t(0.5) - ddc_of_t(0) ) / norm(X(-dc0,ddc_of_t(0.5) - ddc_of_t(0) ))
-        print "init acceleration ", ddc_of_t(0)
+        #~ print "cross product ", X(-dc0,ddc_of_t(0.5) - ddc_of_t(0) ) / norm(X(-dc0,ddc_of_t(0.5) - ddc_of_t(0) ))
+        #~ print "init acceleration ", ddc_of_t(0)
         print "init velocity ", dc_of_t(0)
         print "end velocity ", dc_of_t(t_max)
         #~ print "cross product ", X(-dc0,ddc_of_t(t_max) - ddc_of_t(0) ) / norm(X(-dc0,ddc_of_t(t_max) - ddc_of_t(0) ))
