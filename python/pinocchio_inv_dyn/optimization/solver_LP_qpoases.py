@@ -110,6 +110,7 @@ class SolverLPQpOases (solver_LP_abstract.SolverLPAbstract):
             self._y = np.zeros(n+m_con);
             self._n = n;
             self._m_con = m_con;
+            self._initialized = False;
             
         maxActiveSetIter    = np.array([self._maxIter]);
         maxComputationTime  = np.array(self._maxTime);
