@@ -22,7 +22,7 @@ from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIW
 import cProfile
 
 
-from pinocchio_inv_dyn.multi_contact.bezier.bezier_0_step_capturability import BezierZeroStepCapturability
+from pinocchio_inv_dyn.multi_contact.bezier.bezier_0_step_capturability import BezierZeroStepCapturability ,compute_CWC
 
 
 __EPS = 1e-5;
@@ -39,8 +39,8 @@ def compute_w(c, ddc, dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81]))
 def is_stable(H,c=array([0.,0.,0.]), ddc=array([0.,0.,0.]), dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81]), robustness = 0.):
     w = compute_w(c, ddc, dL, m, g_vec) 
     res = np.max(H.dot(w))
-    if(res > 0):
-		print "ribt ", res
+    #~ if(res > 0):
+		#~ print "ribt ", res
     return res<=-robustness
 
 
@@ -96,7 +96,8 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         Y_UB = np.max(p[:,1]+Y_MARG);
         Z_LB = np.max(p[:,2]+0.3);
         Z_UB = np.max(p[:,2]+1.5);
-        (H,h) = compute_GIWC(p, N, mu, False);     
+        #~ (H,h) = compute_GIWC(p, N, mu, False);     
+        H = -compute_CWC(p, N, mass, mu); h = zeros(H.shape[0])
         (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
         
     dc0 = np.random.uniform(-1, 1, size=3); 
@@ -109,12 +110,13 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     #~ bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = [Ineq_kin,ineq_kin ]);
     bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = None);
     stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
-    #~ window_times = [1]+ [0.1*i for i in range(1,22)] #try nominal time first
-    window_times = [1]+ [0.4*i for i in range(1,4)] #try nominal time first
-    #~ window_times = [1]+ [0.4*i for i in range(2,6)] #try nominal time first
-    #~ window_times = [1]
+    #~ window_times = [1]+ [0.2*i for i in range(1,5)] + [0.2*i for i in range(6,11)] #try nominal time first
+    #~ window_times =  [0.2*i for i in range(1,5)] + [0.2*i for i in range(6,11)] #try nominal time first
+    #~ window_times = [1]+ [0.4*i for i in range(1,4)] #try nominal time first
+    #~ window_times = [1]+ [0.4*i for i in range(3,6)] #try nominal time first
+    window_times = [1]
     found = False
-    time_step_check = 0.1
+    time_step_check = 0.2
     for i, el in enumerate(window_times):
         if (found):
             break
@@ -127,11 +129,32 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
             if i != 0:
                 print "Failed to stop at 1, but managed to stop at ", el
     
-    try:
-        res2 = stabilitySolver.can_I_stop();
-    except Exception as e:
-        pass
+    found = False
+    time_step_check = -1.
+    for i, el in enumerate(window_times):
+        if (found):
+            break
+        res2 = bezierSolver.can_I_stop(T=el, time_step = time_step_check);
+        if (res2.is_stable):
+            found = True
+            print "found at ", el
+            __check_trajectory(bezierSolver._p0, bezierSolver._p1, res2.c, res2.c, el, bezierSolver._H, 
+                               #~ bezierSolver._mass, bezierSolver._g, time_step = time_step_check)
+                               bezierSolver._mass, bezierSolver._g, time_step = time_step_check)
+            if i != 0:
+                print "Failed to stop at 1, but managed to stop at ", el
+    
+    #~ try:
+        #~ res2 = stabilitySolver.can_I_stop();
+        #~ res2 = bezierSolver.can_I_stop(T=el, time_step = 0.1);
+    #~ except Exception as e:
+        #~ pass
         
+    if(res2.is_stable != res.is_stable ):
+		if(res.is_stable):
+			print "discretize won"
+		else:
+			print "continuous won"
     
     return res.is_stable, res2.is_stable, res, res2, c0, dc0, H, h, p, N
         
@@ -154,7 +177,7 @@ if __name__=="__main__":
     #~ times_agree_stop = []
     
     num_tested = 0.
-    for i in range(100):
+    for i in range(10000):
         num_tested = i-1
         mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test()
         #~ print "H test", H.shape 
@@ -162,7 +185,7 @@ if __name__=="__main__":
             total_disagree+=1
             if(mine):
                 #~ times_disagree +=[r_mine.t]
-                raise ValueError (" BITE ME " )
+                #~ raise ValueError (" BITE ME " )
                 margin_i_win_he_lose+=[r_theirs.dc]
                 curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
                 print "margin when he lost: ", norm(r_theirs.dc)

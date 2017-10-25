@@ -23,7 +23,7 @@ np.set_printoptions(precision=2, suppress=True, linewidth=100);
 
 from centroidal_dynamics import *
 
-__EPS = 1e-5;
+__EPS = 1e-8;
 
 
 
@@ -67,6 +67,7 @@ def compute_CWC(p, N, mass, mu):
     eq.setNewContacts(asmatrix(p),asmatrix(N),mu,EquilibriumAlgorithm.EQUILIBRIUM_ALGORITHM_PP)
     H, h = eq.getPolytopeInequalities()
     assert(norm(h) < __EPS), "h is not equal to zero"
+    #~ print "len H, ", H.shape[0]
     return normalize(np.squeeze(np.asarray(-H)))
 
 #################################################
@@ -164,7 +165,7 @@ class BezierZeroStepCapturability(object):
             self._kinematic_constraints = kinematic_constraints[:]
         else:
             self._kinematic_constraints = None        
-        self._solver = getNewSolver('qpoases', "name")
+        self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
         
     def init_bezier(self, c0, dc0, n, T =1.):
         self._n = n
@@ -181,44 +182,29 @@ class BezierZeroStepCapturability(object):
                        
         
     def __compute_wixs(self, T, num_step = -1):        
-        alpha = 1 / (T*T)
-        #~ print "alpha ", alpha
+        alpha = 1. / (T*T)
         wps = [wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX, alpha)  for wi in wis]
         if num_step > 0:
-            dt = (float(T)/num_step)
-            res = []
-            for i in range(num_step+1):
-                (wxres, wsres) = (zeros([6,3]),zeros(6))
-                #~ print "LP dt", i*dt
-                for j, bj in enumerate(b4):
-                    print "bj ", j
-                    (wxi, wsi) = wps[j]
-                    bi = bj(i*dt)
-                    wxres += wxi * bi
-                    wsres += wsi * bi
-                    print "bi", bi
-                    print "wsi", wsi
-                    print "wxres", wsres
-                res +=[(wxres, wsres)]
-            return res
-            #~ wps_bern = [ [ (b(i*dt)*wps[idx][0], b(i*dt)*wps[idx][1]) for idx,b in enumerate(b4)] for i in range(num_step + 1) ]
-            #~ wps = [reduce(lambda a, b : (a[0] + b[0], a[1] + b[1]), wps_bern_i) for wps_bern_i in wps_eval]
+            #~ print " discrete case, num steps :", num_step
+            dt = (1./float(num_step))
+            wps_bern = [ [ (b(i*dt)*wps[idx][0], b(i*dt)*wps[idx][1]) for idx,b in enumerate(b4)] for i in range(num_step + 1) ]
+            wps = [reduce(lambda a, b : (a[0] + b[0], a[1] + b[1]), wps_bern_i) for wps_bern_i in wps_bern]
         return wps
         
     def __add_kinematic_and_normalize(self,A,b):        
-        #~ if self._kinematic_constraints != None:
-            #~ dim_kin = self._kinematic_constraints[0].shape[0]
-            #~ A[-dim_kin:,:] = self._kinematic_constraints[0][:]
-            #~ b[-dim_kin:] =  self._kinematic_constraints[1][:]
-        #~ A, b = normalize(A,b)
+        if self._kinematic_constraints != None:
+            dim_kin = self._kinematic_constraints[0].shape[0]
+            A[-dim_kin:,:] = self._kinematic_constraints[0][:]
+            b[-dim_kin:] =  self._kinematic_constraints[1][:]
+        A, b = normalize(A,b)
         self.__Ain = A[:]; self.__Aub = b[:]
+        #~ print "len constraints: ", b.shape
         #~ pass
         
     def _compute_num_steps(self, T, time_step):    
         num_steps = -1    
-        if(time_step > 0):
+        if(time_step > 0.):
             num_steps = int(T / time_step)
-            #~ print "LP num steps", num_steps
         return num_steps
         
     def _init_matrices_A_b(self, wps):    
@@ -259,9 +245,13 @@ class BezierZeroStepCapturability(object):
         ''' Determine whether the system can come to a stop without changing contacts.
             Keyword arguments:
               c0 -- initial CoM position 
-              dc0 -- initial CoM velocity 
-              
+              dc0 -- initial CoM velocity              
               T -- the EXACT given time to stop
+              time_step -- if negative, a continuous resolution is used 
+              to guarantee that the trajectory is feasible. If > 0, then
+              used a discretized approach to validate trajectory. This allows
+              to have control points outside the cone, which is supposed to increase the 
+              solution space.
             Output: An object containing the following member variables:
               is_stable -- boolean value
               c -- final com position
@@ -295,83 +285,12 @@ class BezierZeroStepCapturability(object):
             dual solution
                 '''
         # for the moment c is random stuff
-        c = zeros(3);c[2] = -1
+        c = zeros(3);c[2] = -1.
         wps = self.compute_6d_control_point_inequalities(T, time_step)
-        (status, x, y) = self._solver.solve(c, lb= -100 * ones(3), ub = 100 * ones(3), A_in=self.__Ain, Alb=-100000* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
+        self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
+        (status, x, y) = self._solver.solve(c, lb= -100. * ones(3), ub = 100. * ones(3), A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
-        if status==LP_status.LP_STATUS_OPTIMAL:
-            #check that constraints are satisfied
-            if not (self.__Ain.dot(x) <= self.__Aub).all():
-                print  "inequalities not satisfied !" + str( np.max(self.__Ain.dot(x) - self.__Aub))
-            else:
-                print "OK3"
-            H  = self._H
-            dimH  = self._H.shape[0]
-            mH    = self._mass *self._H  
-            w6 = []
-            wps = self.__compute_wixs(T ,-1)
-            #~ print "len wps", len(wps)
-            for i,(wix, wis) in enumerate(wps):
-                wi = wix.dot(x)+ wis [:]
-                #~ print "wi ", wi
-                bi = b4[i]
-                w6+=[(bi, wi[:],wix, wis)]
-            def w6_(t):
-                res = zeros(6)
-                wisres = zeros(6)
-                wixres = zeros([6,3])
-                for i, (bi, wi, wix, wis) in enumerate(w6):
-                    #~ print "adding ", bi(t) * wi
-                    res = res +  bi(t) * wi
-                    wixres = wixres + bi(t) * wix
-                    wisres = wisres + bi(t) * wis
-                return (self._mass * (res - np.concatenate([self._g,zeros(3)])), wixres, wisres)
-             
-            wps = [self._p0,self._p1,x,x]; wps = matrix([pi.tolist() for pi in wps]).transpose() 
-            c_t = bezier(wps)
-            ddc_t = c_t.compute_derivate(2)                    
-            def c_tT(t):
-                return asarray(c_t(t/T)).flatten()
-            def ddc_tT(t):
-                return 1./(T*T) * asarray(ddc_t(t/T)).flatten()
-                
-            def compute_w(c, ddc, dL=array([0.,0.,0.]), m = 54., g_vec=array([0.,0.,-9.81])):
-                w1 = m * (ddc - g_vec)
-                return array(w1.tolist() + (X(c, w1) + dL).tolist())
-                
-            resolution = self._compute_num_steps(T,time_step)
-            for i in range(resolution):
-                t = T * float(i) / float(resolution)
-                print "t / T ", t, " / ", T
-                w = compute_w(c_tT(t), ddc_tT(t), dL=array([0.,0.,0.]), m=self._mass, g_vec = self._g) 
-                #~ print  "waypoints difference"
-                #~ print  "w6 ",w6_(t / T)
-                #~ print  "wdiff ",w - w6_(t / T)
-                w6r, wxi, wsi = w6_(t / T)
-                if np.max(H.dot(w)) >0.00:
-                    print "w wrong ",  np.max(H.dot(w))
-                    print "w6 wrong ?", np.max(H.dot(w6r)) 
-                    if np.max(w6r) > 0:
-                        print "checking inequality"                        
-                        print "Ax , ",   self.__Ain[i*dimH : (i+1)*dimH, : ].dot(x)                     
-                        print "wxi , ",   wxi.shape                
-                        print "ax wps , ",    (mH.dot(wxi)).dot(x)                    
-                        print "b ineq, ",  self.__Aub[i*dimH : (i+1)*dimH    ]                       
-                        print "b wps, ",  - mH.dot(wsi - np.concatenate([self._g,zeros(3)]))
-                        print "a diff , ", self.__Ain[i*dimH : (i+1)*dimH, : ].dot(x)   - mH.dot(wxi).dot(x) 
-                        print "b diff , ", self.__Aub[i*dimH : (i+1)*dimH    ]   + mH.dot(wsi - np.concatenate([self._g,zeros(3)]))
-                        w_inq = (self.__Ain[i*dimH : (i+1)*dimH, : ]).dot(x) - self.__Aub[i*dimH : (i+1)*dimH    ] 
-                        print "w_inq ", w_inq 
-                        print "w6 ", H.dot(w6r) 
-                        print "diff ", w_inq - H.dot(w6r)
-                        assert np.max(H.dot(w)) <=0.0001 ,"w wrong" 
-                if np.max(H.dot(w6r)) >=0.0:
-                    print "w6 wrong", np.max(H.dot(w6r))
-                    print "w wrong ?",  np.max(H.dot(w))
-                    assert np.max(H.dot(w)) <=0.0001 ,"w wrong" 
-            #~ raise ValueError("tg")
-                
                   
         wps = [self._p0,self._p1,x,x]; wps = matrix([pi.tolist() for pi in wps]).transpose()
         c_of_s = bezier(wps)
