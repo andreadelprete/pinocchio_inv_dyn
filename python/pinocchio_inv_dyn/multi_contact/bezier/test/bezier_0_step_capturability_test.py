@@ -107,30 +107,30 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     ineq_kin = zeros(3); ineq_kin[2] = -Z_MIN
     
     
-    #~ bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = [Ineq_kin,ineq_kin ]);
-    bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = None);
+    bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = [Ineq_kin,ineq_kin ]);
+    #~ bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = None);
     stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
-    #~ window_times = [1]+ [0.2*i for i in range(1,5)] + [0.2*i for i in range(6,11)] #try nominal time first
+    window_times = [1]+ [0.2*i for i in range(1,5)] + [0.2*i for i in range(6,11)] #try nominal time first
     #~ window_times =  [0.2*i for i in range(1,5)] + [0.2*i for i in range(6,11)] #try nominal time first
     #~ window_times = [1]+ [0.4*i for i in range(1,4)] #try nominal time first
     #~ window_times = [1]+ [0.4*i for i in range(3,6)] #try nominal time first
-    window_times = [1]
+    #~ window_times = [1]
     found = False
-    time_step_check = 0.2
+    time_step_check = 0.05
     for i, el in enumerate(window_times):
         if (found):
             break
         res = bezierSolver.can_I_stop(T=el, time_step = time_step_check);
         if (res.is_stable):
             found = True
-            print "found at ", el
+            #~ print "found at ", el
             __check_trajectory(bezierSolver._p0, bezierSolver._p1, res.c, res.c, el, bezierSolver._H, 
                                bezierSolver._mass, bezierSolver._g, time_step = time_step_check)
             if i != 0:
-                print "Failed to stop at 1, but managed to stop at ", el
+                print "discretized Failed to stop at 1, but managed to stop at ", el
     
     found = False
-    time_step_check = -1.
+    time_step_check = -0.2
     for i, el in enumerate(window_times):
         if (found):
             break
@@ -138,23 +138,21 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         if (res2.is_stable):
             found = True
             print "found at ", el
-            __check_trajectory(bezierSolver._p0, bezierSolver._p1, res2.c, res2.c, el, bezierSolver._H, 
-                               #~ bezierSolver._mass, bezierSolver._g, time_step = time_step_check)
+            __check_trajectory(bezierSolver._p0, bezierSolver._p1, res2.c, res2.c, el, bezierSolver._H,
                                bezierSolver._mass, bezierSolver._g, time_step = time_step_check)
             if i != 0:
-                print "Failed to stop at 1, but managed to stop at ", el
-    
-    #~ try:
-        #~ res2 = stabilitySolver.can_I_stop();
-        #~ res2 = bezierSolver.can_I_stop(T=el, time_step = 0.1);
-    #~ except Exception as e:
-        #~ pass
+                print "discretize Failed to stop at 1, but managed to stop at ", el
+    res2 = None
+    try:
+        res2 = stabilitySolver.can_I_stop();
+    except Exception as e:
+        pass
         
     if(res2.is_stable != res.is_stable ):
 		if(res.is_stable):
 			print "discretize won"
 		else:
-			print "continuous won"
+			print "old won"
     
     return res.is_stable, res2.is_stable, res, res2, c0, dc0, H, h, p, N
         
@@ -175,42 +173,6 @@ if __name__=="__main__":
     curves_when_i_win = []
     #~ times_disagree = []
     #~ times_agree_stop = []
-    
-    num_tested = 0.
-    for i in range(10000):
-        num_tested = i-1
-        mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test()
-        #~ print "H test", H.shape 
-        if(mine != theirs):
-            total_disagree+=1
-            if(mine):
-                #~ times_disagree +=[r_mine.t]
-                #~ raise ValueError (" BITE ME " )
-                margin_i_win_he_lose+=[r_theirs.dc]
-                curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
-                print "margin when he lost: ", norm(r_theirs.dc)
-            #~ else:
-                #~ times_disagree +=[r_theirs.t]
-            if mine:
-                mine_won +=1
-            else:
-                mine_lose +=1
-        elif(mine or theirs):
-            total_stop+=1
-            #~ times_agree_stop+=[r_mine.t]
-            margin_he_wins_i_lost+=[r_theirs.ddc_min]
-            
-            #~ margin_i_win_he_lose+=[r_theirs.dc]
-            #~ curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
-            #~ print "margin when he wins: ", r_theirs.ddc_min
-        else:
-            total_not_stop+=1
-    
-    print "% of stops", 100. * float(total_stop) / num_tested, total_stop
-    print "% of total_disagree", 100. * float(total_disagree) / num_tested, total_disagree
-    if total_disagree > 0:
-        print "% of wins", 100. * float(mine_won) / total_disagree
-        print "% of lose", 100. * float(mine_lose) / total_disagree
     
     from mpl_toolkits.mplot3d import Axes3D
     import matplotlib.pyplot as plt
@@ -321,4 +283,42 @@ if __name__=="__main__":
         for i in range(n):
             plot_win_curve(i, num_pts)
         plt.show()
+    
+    num_tested = 0.
+    for i in range(10000):
+        num_tested = i-1
+        mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test()
+        #~ print "H test", H.shape 
+        if(mine != theirs):
+            total_disagree+=1
+            if(mine):
+                #~ times_disagree +=[r_mine.t]
+                #~ raise ValueError (" BITE ME " )
+                margin_i_win_he_lose+=[r_theirs.dc]
+                curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
+                print "margin when he lost: ", norm(r_theirs.dc)
+            #~ else:
+                #~ times_disagree +=[r_theirs.t]
+            if mine:
+                mine_won +=1
+            else:
+                mine_lose +=1
+        elif(mine or theirs):
+            total_stop+=1
+            #~ times_agree_stop+=[r_mine.t]
+            margin_he_wins_i_lost+=[r_theirs.ddc_min]
+            
+            #~ margin_i_win_he_lose+=[r_theirs.dc]
+            #~ curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
+            #~ print "margin when he wins: ", r_theirs.ddc_min
+        else:
+            total_not_stop+=1
+    
+    print "% of stops", 100. * float(total_stop) / num_tested, total_stop
+    print "% of total_disagree", 100. * float(total_disagree) / num_tested, total_disagree
+    if total_disagree > 0:
+        print "% of wins", 100. * float(mine_won) / total_disagree
+        print "% of lose", 100. * float(mine_lose) / total_disagree
+    
+    
         

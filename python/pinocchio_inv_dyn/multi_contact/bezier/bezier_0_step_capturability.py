@@ -288,7 +288,7 @@ class BezierZeroStepCapturability(object):
         c = zeros(3);c[2] = -1.
         wps = self.compute_6d_control_point_inequalities(T, time_step)
         
-        self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
+        #~ self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
         (status, x, y) = self._solver.solve(c, lb= -100. * ones(3), ub = 100. * ones(3), A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
                   
