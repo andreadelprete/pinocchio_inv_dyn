@@ -311,7 +311,7 @@ class BezierZeroStepCapturability(object):
         
         
         return Bunch(is_stable=status==LP_status.LP_STATUS_OPTIMAL, c=x, dc=zeros(3), 
-                             computation_time=-1, ddc_min=0.0, t = T, c_of_t = c_of_t(c_of_s), dc_of_t = dc_of_t(dc_of_s), ddc_of_t = c_of_t(ddc_of_s));
+                             computation_time = self._solver.getLpTime(), ddc_min=0.0, t = T, c_of_t = c_of_t(c_of_s), dc_of_t = dc_of_t(dc_of_s), ddc_of_t = c_of_t(ddc_of_s));
 
     def predict_future_state(self, t_pred, c0=None, dc0=None, MAX_ITER=1000):
         ''' Compute what the CoM state will be at the specified time instant if the system
