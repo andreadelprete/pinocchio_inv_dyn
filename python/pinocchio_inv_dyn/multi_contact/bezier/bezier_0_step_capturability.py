@@ -292,8 +292,8 @@ class BezierZeroStepCapturability(object):
         (status, x, y) = self._solver.solve(c, lb= -100. * ones(3), ub = 100. * ones(3), A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
                   
-        wps = [self._p0,self._p1,x,x]; wps = matrix([pi.tolist() for pi in wps]).transpose()
-        c_of_s = bezier(wps)
+        wps = [self._p0,self._p1,x,x]; wpsraw = matrix([pi.tolist() for pi in wps]).transpose()
+        c_of_s = bezier(wpsraw)
         dc_of_s = c_of_s.compute_derivate(1)
         ddc_of_s = c_of_s.compute_derivate(2)
         def c_of_t(curve):
@@ -311,7 +311,8 @@ class BezierZeroStepCapturability(object):
         
         
         return Bunch(is_stable=status==LP_status.LP_STATUS_OPTIMAL, c=x, dc=zeros(3), 
-                             computation_time = self._solver.getLpTime(), ddc_min=0.0, t = T, c_of_t = c_of_t(c_of_s), dc_of_t = dc_of_t(dc_of_s), ddc_of_t = c_of_t(ddc_of_s));
+                             computation_time = self._solver.getLpTime(), ddc_min=0.0, t = T, c_of_t = c_of_t(c_of_s), dc_of_t = dc_of_t(dc_of_s), ddc_of_t = c_of_t(ddc_of_s),
+                             wps = wps);
 
     def predict_future_state(self, t_pred, c0=None, dc0=None, MAX_ITER=1000):
         ''' Compute what the CoM state will be at the specified time instant if the system
