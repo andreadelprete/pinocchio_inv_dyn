@@ -33,10 +33,18 @@ def skew(x):
     res[1,0] =  x[2];  res[1,1] =    0 ; res[1,2] = -x[0];
     res[2,0] = -x[1];  res[2,1] =  x[0]; res[2,2] =   0  ;
     return res
+    
+def splitId(v):
+    dim = v.shape[0]
+    res = zeros([dim,dim]);
+    for i in range(dim):
+        res[i,i] = v[i]
+    return res
         
 
 def __init_6D():
     return zeros([6,3]), zeros(6)
+    
 
 
 
@@ -112,8 +120,35 @@ def w4(p0, p1, g, p0X, p1X, gX, alpha):
     #~ ws[3:]   = 0 
     return  (wx, ws)
     
+#angular momentum waypoints
+def u0(l0, alpha):
+    ux, us = __init_6D()    
+    us[3:] = alpha*l0[:]
+    return  (ux, us)
+    
+def u1(l0, alpha):
+    ux, us = __init_6D()  
+    us[3:] = -1.5*l0*alpha
+    return  (ux, us)
+    
+def u2(l0, alpha):
+    ux, us = __init_6D()    
+    ux[3:] = identity(3)* (-1.5) * alpha
+    us[3:] = -l0 / 2. * alpha
+    return  (ux, us)
+    
+def u3(l0, alpha):
+    ux, us = __init_6D()    
+    ux[3:] = identity(3)*  (-1.5) * alpha
+    return  (ux, us)
+    
+def u4(l0, alpha):
+    ux, us = __init_6D()   
+    return  (ux, us)
+
 
 wis = [w0,w1,w2,w3,w4]
+uis = [u0,u1,u2,u3,u4]
 b4 = [bernstein(4,i) for i in range(5)]
 
 #################################################
@@ -131,7 +166,7 @@ class BezierZeroStepCapturability(object):
     _outerIterations = 0;
     _innerIterations = 0;
     
-    def __init__ (self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, kinematic_constraints = None, 
+    def __init__ (self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, kinematic_constraints = None, angular_momentum_constraints = None,
                   maxIter=1000, verb=0, regularization=1e-5, solver='qpoases'):
         ''' Constructor
             @param c0 Initial CoM position
@@ -165,6 +200,11 @@ class BezierZeroStepCapturability(object):
             self._kinematic_constraints = kinematic_constraints[:]
         else:
             self._kinematic_constraints = None        
+        if angular_momentum_constraints != None:
+            self._angular_momentum_constraints = angular_momentum_constraints[:]
+        else:
+            self._angular_momentum_constraints = None   
+                 
         self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
         
     def init_bezier(self, c0, dc0, n, T =1.):
@@ -180,26 +220,61 @@ class BezierZeroStepCapturability(object):
         self._mu                = mu;
         self._H                 = compute_CWC(self._contact_points, self._contact_normals, self._mass, mu)#CWC inequality matrix
                        
-        
+                          
     def __compute_wixs(self, T, num_step = -1):        
         alpha = 1. / (T*T)
         wps = [wi(self._p0, self._p1, self._g, self._p0X, self._p1X, self._gX, alpha)  for wi in wis]
         if num_step > 0:
-            #~ print " discrete case, num steps :", num_step
             dt = (1./float(num_step))
             wps_bern = [ [ (b(i*dt)*wps[idx][0], b(i*dt)*wps[idx][1]) for idx,b in enumerate(b4)] for i in range(num_step + 1) ]
             wps = [reduce(lambda a, b : (a[0] + b[0], a[1] + b[1]), wps_bern_i) for wps_bern_i in wps_bern]
         return wps
         
-    def __add_kinematic_and_normalize(self,A,b):        
+    #angular momentum waypoints
+    def __compute_uixs(self, l0, T, num_step = -1):        
+        alpha = 1. / (T)
+        wps = [ui(l0, alpha)  for ui in uis]
+        if num_step > 0:
+            dt = (1./float(num_step))
+            wps_bern = [ [ (b(i*dt)*wps[idx][0], b(i*dt)*wps[idx][1]) for idx,b in enumerate(b4)] for i in range(num_step + 1) ]
+            wps = [reduce(lambda a, b : (a[0] + b[0], a[1] + b[1]), wps_bern_i) for wps_bern_i in wps_bern]
+        return wps
+
+    def _init_matrices_AL_bL(self, wps, A, b):    
+        dimL = 0
+        if self._angular_momentum_constraints != None:
+            dimL = self._angular_momentum_constraints[0].shape[0]        
+        AL = zeros([A.shape[0]+dimL, 6]); 
+        bL = zeros([A.shape[0]+dimL   ]); 
+        AL[:A.shape[0],:3] = A
+        bL[:b.shape[0]   ] = b 
+        return AL,bL
+        
+    def __add_angular_momentum(self,A,b,l0, T, num_steps):       
+        wps = self.__compute_uixs(l0, T ,num_steps)    
+        AL, bL = self._init_matrices_AL_bL(wps, A, b)      
+        dimH  = self._H.shape[0]          
+        #final matrix has num rows equal to initial matrix rows + angular momentum constraints
+        # the angular momentum constraints are added AFTER the eventual kinematic ones
+        for i, (uxi, usi) in enumerate(wps):       
+            AL[i*dimH : (i+1)*dimH, 3:]  = self._H.dot(uxi) #constant part of A, Ac = Ac * wxi
+            bL[i*dimH : (i+1)*dimH    ] += self._H.dot(-usi)
+        
+        if self._angular_momentum_constraints != None:
+            dimL = self._angular_momentum_constraints[0].shape[0]
+            AL[-dimL:,3:] = self._angular_momentum_constraints[0][:]
+            bL[-dimL:   ] = self._angular_momentum_constraints[1][:]
+        AL, bL = normalize(AL,bL)
+        return AL, bL
+    
+    def __add_kinematic_and_normalize(self,A,b, norm = True):        
         if self._kinematic_constraints != None:
             dim_kin = self._kinematic_constraints[0].shape[0]
             A[-dim_kin:,:] = self._kinematic_constraints[0][:]
             b[-dim_kin:] =  self._kinematic_constraints[1][:]
-        A, b = normalize(A,b)
-        self.__Ain = A[:]; self.__Aub = b[:]
-        #~ print "len constraints: ", b.shape
-        #~ pass
+        if(norm):
+            A, b = normalize(A,b)
+        return A, b
         
     def _compute_num_steps(self, T, time_step):    
         num_steps = -1    
@@ -217,7 +292,7 @@ class BezierZeroStepCapturability(object):
         return A,b
         
     
-    def compute_6d_control_point_inequalities(self, T, time_step = -1.):
+    def compute_6d_control_point_inequalities(self, T, time_step = -1., l0 = None):
         ''' compute the inequality methods that determine the 6D bezier curve w(t)
             as a function of a variable waypoint for the 3D COM trajectory.
             The initial curve is of degree 3 (init pos and velocity, 0 velocity constraints + one free variable).
@@ -237,11 +312,17 @@ class BezierZeroStepCapturability(object):
         for i, (wxi, wsi) in enumerate(wps):       
             A[i*dimH : (i+1)*dimH, : ]  = mH.dot(wxi) #constant part of A, Ac = Ac * wxi
             b[i*dimH : (i+1)*dimH    ]  = mH.dot(bc - wsi)
-        self.__add_kinematic_and_normalize(A,b)
+        use_angular_momentum = l0 != None
+        A,b = self.__add_kinematic_and_normalize(A,b, not use_angular_momentum)
+        if use_angular_momentum:
+            A,b = self.__add_angular_momentum(A,b, l0, T, num_steps)        
+        self.__Ain = A[:]; self.__Aub = b[:]
+        
+            
     
         
         
-    def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None, time_step = -1):
+    def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None, time_step = -1, l0 = None):
         ''' Determine whether the system can come to a stop without changing contacts.
             Keyword arguments:
               c0 -- initial CoM position 
@@ -252,6 +333,8 @@ class BezierZeroStepCapturability(object):
               used a discretized approach to validate trajectory. This allows
               to have control points outside the cone, which is supposed to increase the 
               solution space.
+              l0 : if equals None, angular momentum is not considered and set to 0. Else
+              it becomes a variable of the problem and l0 is the initial angular momentum
             Output: An object containing the following member variables:
               is_stable -- boolean value
               c -- final com position
@@ -259,6 +342,11 @@ class BezierZeroStepCapturability(object):
               ddc_min -- [WARNING] Not relevant (used)
               t -- always T (Bezier curve)
               computation_time -- time taken to solve all the LPs
+              c_of_t, dc_of_t, ddc_of_t: trajectories and derivatives in function of the time
+              dL_of_t : trajectory of the angular momentum along time
+              wps  : waypoints of the solution bezier curve c*(s)
+              wpsL : waypoints of the solution angular momentum curve   L*(s) Zero if no angular mementum
+              wpsdL : waypoints of the solution angular momentum curve dL*(s) Zero if no angular mementum
         '''        
         if T <=0.:
             raise ValueError('T cannot be lesser than 0')
@@ -284,18 +372,23 @@ class BezierZeroStepCapturability(object):
             primal solution
             dual solution
                 '''
-        # for the moment c is random stuff
-        c = zeros(3);c[2] = -1.
-        wps = self.compute_6d_control_point_inequalities(T, time_step)
+        use_angular_momentum = l0 != None
+        # for the moment c is random stuff.
+        dim_pb = 6 if use_angular_momentum else 3
+        c = zeros(dim_pb); c[2] = -1
+        wps = self.compute_6d_control_point_inequalities(T, time_step, l0)
+        self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
+        (status, x, y) = self._solver.solve(c, lb= -100. * ones(dim_pb), ub = 100. * ones(dim_pb), A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
-        #~ self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
-        (status, x, y) = self._solver.solve(c, lb= -100. * ones(3), ub = 100. * ones(3), A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
         
-                  
-        wps = [self._p0,self._p1,x,x]; wpsraw = matrix([pi.tolist() for pi in wps]).transpose()
+        
+        wps = [self._p0,self._p1,x[:3],x[:3]]; wpsraw = matrix([pi.tolist() for pi in wps]).transpose()
+        wpsL  = [zeros(3) if not use_angular_momentum else l0, zeros(3) if not use_angular_momentum else x[-3:] ,zeros(3),zeros(3)]; 
+        wpsdL = [3*(wpsL[1] - wpsL[0]) ,3*(- wpsL[1]), zeros(3)];  wpsdLraw = matrix([pi.tolist() for pi in wpsdL]).transpose()
         c_of_s = bezier(wpsraw)
         dc_of_s = c_of_s.compute_derivate(1)
         ddc_of_s = c_of_s.compute_derivate(2)
+        dL_of_s = bezier(wpsdLraw)        
         def c_of_t(curve):
             def _eval(t):
                 return  asarray(curve(t/T)).flatten()
@@ -310,9 +403,9 @@ class BezierZeroStepCapturability(object):
             return _eval
         
         
-        return Bunch(is_stable=status==LP_status.LP_STATUS_OPTIMAL, c=x, dc=zeros(3), 
+        return Bunch(is_stable=status==LP_status.LP_STATUS_OPTIMAL, c=x[:3], dc=zeros(3), 
                              computation_time = self._solver.getLpTime(), ddc_min=0.0, t = T, c_of_t = c_of_t(c_of_s), dc_of_t = dc_of_t(dc_of_s), ddc_of_t = c_of_t(ddc_of_s),
-                             wps = wps);
+                             dL_of_t = dc_of_t(dL_of_s), wps = wps, wpsL = wpsL,  wpsdL = wpsdL);
 
     def predict_future_state(self, t_pred, c0=None, dc0=None, MAX_ITER=1000):
         ''' Compute what the CoM state will be at the specified time instant if the system
