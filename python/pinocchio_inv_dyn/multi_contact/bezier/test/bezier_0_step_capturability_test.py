@@ -223,7 +223,7 @@ def test_continuous_vs_continuous_momentum(N_CONTACTS = 2, solver='qpoases', ver
                 print "continuous Failed to stop at 1, but managed to stop at ", el
     
     found = False
-    time_step_check = -0.2
+    time_step_check = 0.05
     for i, el in enumerate(window_times):
         if (found):
             break
@@ -250,6 +250,95 @@ def test_continuous_vs_continuous_momentum(N_CONTACTS = 2, solver='qpoases', ver
     
     return res2.is_stable, res.is_stable, res2, res, c0, dc0, H, h, p, N
 
+def test_discretize_vs_discretize_momentum(N_CONTACTS = 2, solver='qpoases', verb=0):
+    
+    DO_PLOTS = False;
+    PLOT_3D = False;
+    mu = 0.5;           # friction coefficient
+    lx = 0.1;           # half foot size in x direction
+    ly = 0.07;          # half foot size in y direction
+    #First, generate a contact configuration
+    CONTACT_POINT_UPPER_BOUNDS = [ 0.5,  0.5,  0.5];
+    CONTACT_POINT_LOWER_BOUNDS = [-0.5, -0.5,  0.0];
+    gamma = atan(mu);   # half friction cone angle
+    RPY_LOWER_BOUNDS = [-2*gamma, -2*gamma, -pi];
+    RPY_UPPER_BOUNDS = [+2*gamma, +2*gamma, +pi];
+    MIN_CONTACT_DISTANCE = 0.3;
+    global mass
+    global g_vector
+    X_MARG = 0.07;
+    Y_MARG = 0.07;
+    
+    succeeded = False;
+    while(not succeeded):
+        (p, N) = generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTACT_POINT_UPPER_BOUNDS, 
+                                   RPY_LOWER_BOUNDS, RPY_UPPER_BOUNDS, MIN_CONTACT_DISTANCE, False);
+        X_LB = np.min(p[:,0]-X_MARG);
+        X_UB = np.max(p[:,0]+X_MARG);
+        Y_LB = np.min(p[:,1]-Y_MARG);
+        Y_UB = np.max(p[:,1]+Y_MARG);
+        Z_LB = np.max(p[:,2]+0.3);
+        Z_UB = np.max(p[:,2]+1.5);
+        #~ (H,h) = compute_GIWC(p, N, mu, False);     
+        H = -compute_CWC(p, N, mass, mu); h = zeros(H.shape[0])
+        (succeeded, c0) = find_static_equilibrium_com(mass, [X_LB, Y_LB, Z_LB], [X_UB, Y_UB, Z_UB], H, h);
+        
+    dc0 = np.random.uniform(-1, 1, size=3); 
+    
+    Z_MIN = np.max(p[:,2])-0.1;
+    Ineq_kin = zeros([3,3]); Ineq_kin[2,2] = -1
+    ineq_kin = zeros(3); ineq_kin[2] = -Z_MIN
+    
+    
+    #~ bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = [Ineq_kin,ineq_kin ]);
+    bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = None);
+    stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
+    window_times = [1]+ [0.1*i for i in range(1,10)] + [0.1*i for i in range(11,21)] #try nominal time first
+    #~ window_times =  [0.2*i for i in range(1,5)] + [0.2*i for i in range(6,11)] #try nominal time first
+    #~ window_times = [1]+ [0.4*i for i in range(1,4)] #try nominal time first
+    #~ window_times = [1]+ [0.4*i for i in range(3,6)] #try nominal time first
+    window_times = [0.7]
+    found = False
+    time_step_check = 0.01
+    for i, el in enumerate(window_times):
+        if (found):
+            break
+        res = bezierSolver.can_I_stop(T=el, time_step = time_step_check);
+        if (res.is_stable):
+            found = True
+            #~ print "continuous found at ", el
+            __check_trajectory(bezierSolver._p0, bezierSolver._p1, res.c, res.c, el, bezierSolver._H, 
+                               bezierSolver._mass, bezierSolver._g, time_step = time_step_check, dL = bezier(matrix([p_i.tolist() for p_i in res.wpsdL]).transpose()))
+            if i != 0:
+                print "discretize Failed to stop at 1, but managed to stop at ", el
+    
+    found = False
+    time_step_check = 0.01
+    for i, el in enumerate(window_times):
+        if (found):
+            break
+        res2 = bezierSolver.can_I_stop(T=el, time_step = time_step_check, l0 = zeros(3));
+        if (res2.is_stable):
+            found = True
+            #~ print "ang_momentum found at ", el
+            __check_trajectory(bezierSolver._p0, bezierSolver._p1, res2.c, res2.c, el, bezierSolver._H,
+                               #~ bezierSolver._mass, bezierSolver._g, time_step = time_step_check, dL = res2.dL_of_t)
+                               bezierSolver._mass, bezierSolver._g, time_step = time_step_check, dL =  bezier(matrix([p_i.tolist() for p_i in res2.wpsdL]).transpose()))
+            if i != 0:
+                print "ang_momentum Failed to stop at 1, but managed to stop at ", el
+    #~ res2 = None
+    #~ try:
+        #~ res2 = stabilitySolver.can_I_stop();
+    #~ except Exception as e:
+        #~ pass
+        
+    if(res2.is_stable != res.is_stable ):
+		if(res.is_stable):
+			print "discretize won"
+		else:
+			print "ang_momentum won"
+    
+    return res2.is_stable, res.is_stable, res2, res, c0, dc0, H, h, p, N
 
 if __name__=="__main__":        
     g_vector = np.array([0., 0., -9.81]);
@@ -384,8 +473,9 @@ if __name__=="__main__":
     num_tested = 0.
     for i in range(1000):
         num_tested = i-1
-        mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test_continuous_vs_continuous_momentum()
+        #~ mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test_continuous_vs_continuous_momentum()
         #~ mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test_continuous_vs_discretize()
+        mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test_discretize_vs_discretize_momentum()
         #~ print "H test", H.shape 
         if(mine != theirs):
             total_disagree+=1
