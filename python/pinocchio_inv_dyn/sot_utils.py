@@ -151,11 +151,7 @@ def crossMatrix( v ):
                     [-v[1], v[0],  0   ]] );
     return VP;
     
-''' Compute the inequality constraints of the 6D wrench applicable to 
-    an arbitrary set of contact points with a friction coefficient of mu.
-        H w <= 0 
-'''
-def compute6dContactInequalities(contact_points, contact_normals, mu):
+def compute6dContactMap(contact_points, contact_normals, mu):
     c = contact_points.shape[0];    # number of contact points
     cg = 4;                         # number of generators per contact point    
     G4 = np.zeros((c,3,cg));        # contact generators
@@ -185,9 +181,19 @@ def compute6dContactInequalities(contact_points, contact_normals, mu):
         G_centr4[:3,cg*i:cg*i+cg] = G4[i,:,:];
         G_centr4[3:,cg*i:cg*i+cg] = np.dot(crossMatrix(p[i,:]), G4[i,:,:]);
         
+    return G_centr4;
+    
+''' Compute the inequality constraints of the 6D wrench applicable to 
+    an arbitrary set of contact points with a friction coefficient of mu.
+        H w <= 0 
+'''
+def compute6dContactInequalities(contact_points, contact_normals, mu):
+    ''' compute generators '''
+    G_centr4 = compute6dContactMap(contact_points, contact_normals, mu);
     ''' convert generators to inequalities '''
     H = cone_span_to_face(G_centr4);
     return H;
+    
     
 ''' Compute the inequality constraints of the 6D wrench applicable to a rectangular
     surface of dimension (lxp+lxn)x(lyp+lyn) with a friction coefficient of mu.
