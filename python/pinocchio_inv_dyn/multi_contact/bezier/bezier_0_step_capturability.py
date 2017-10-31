@@ -8,6 +8,7 @@ Created on Thu Sep  1 16:54:39 2016
 from pinocchio_inv_dyn.optimization.solver_LP_abstract import LP_status, LP_status_string
 from pinocchio_inv_dyn.multi_contact.stability_criterion import  Bunch
 from pinocchio_inv_dyn.optimization.solver_LP_abstract import getNewSolver
+from pinocchio_inv_dyn.abstract_solver import AbstractSolver as qp_solver
 
 from spline import bezier, bezier6, polynom, bernstein
 
@@ -182,7 +183,7 @@ class BezierZeroStepCapturability(object):
     _innerIterations = 0;
     
     def __init__ (self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, kinematic_constraints = None, angular_momentum_constraints = None,
-                  maxIter=1000, verb=0, regularization=1e-5, solver='qpoases'):
+                  CWC = None, maxIter=1000, verb=0, regularization=1e-5, solver='qpoases'):
         ''' Constructor
             @param c0 Initial CoM position
             @param dc0 Initial CoM velocity
@@ -210,7 +211,7 @@ class BezierZeroStepCapturability(object):
         self._g                 = np.asarray(g).squeeze().copy();
         self._gX  = skew(self._g )
 #        self._regularization    = regularization;
-        self.set_contacts(contact_points, contact_normals, mu)
+        self.set_contacts(contact_points, contact_normals, mu, CWC)
         if kinematic_constraints != None:
             self._kinematic_constraints = kinematic_constraints[:]
         else:
@@ -220,7 +221,8 @@ class BezierZeroStepCapturability(object):
         else:
             self._angular_momentum_constraints = None   
                  
-        self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
+        self._lp_solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
+        self._qp_solver = qp_solver(3, 0, solver='qpoases', accuracy=1e-6, maxIter=100, verb=0)
         
     def init_bezier(self, c0, dc0, n, T =1.):
         self._n = n
@@ -229,11 +231,11 @@ class BezierZeroStepCapturability(object):
         self._p0X = skew(c0)
         self._p1X = skew(self._p1)
 
-    def set_contacts(self, contact_points, contact_normals, mu):
+    def set_contacts(self, contact_points, contact_normals, mu, CWC):
         self._contact_points    = np.asarray(contact_points).copy();
         self._contact_normals   = np.asarray(contact_normals).copy();
         self._mu                = mu;
-        self._H                 = compute_CWC(self._contact_points, self._contact_normals, self._mass, mu)#CWC inequality matrix
+        self._H                 = CWC if CWC !=None else compute_CWC(self._contact_points, self._contact_normals, self._mass, mu)#CWC inequality matrix
                        
                           
     def __compute_wixs(self, T, num_step = -1):        
@@ -280,7 +282,7 @@ class BezierZeroStepCapturability(object):
             AL[-dimL:,3:] = self._angular_momentum_constraints[0][:]
             bL[-dimL:   ] = self._angular_momentum_constraints[1][:]
         
-        #~ AL, bL = normalize(AL,bL)
+        AL, bL = normalize(AL,bL)
         return AL, bL
     
     def __add_kinematic_and_normalize(self,A,b, norm = True):        
@@ -336,9 +338,30 @@ class BezierZeroStepCapturability(object):
         
             
     
+    def _solve(self, dim_pb, asLp = False, guess = None ):
+        if asLp:
+            c = zeros(dim_pb); c[2] = -1
+            (status, x, y) = self._lp_solver.solve(c, lb= -100. * ones(dim_pb), ub = 100. * ones(dim_pb),
+                                                       A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub,
+                                                       A_eq=None, b=None)
+            return status, x, self._lp_solver.getLpTime()
+        else:
+            #~ self._qp_solver = qp_solver(dim_pb, self.__Ain.shape[0], solver='qpoases', accuracy=1e-6, maxIter=100, verb=0)
+            self._qp_solver.changeInequalityNumber(self.__Ain.shape[0], dim_pb)
+            weight_dist_or = 0.001
+            D = identity(dim_pb); 
+            for i in range(3):
+                D[i,i] = weight_dist_or
+            d = zeros(dim_pb);
+            d[:3]= self._p0 * weight_dist_or
+            D = (D[:]); d = (d[:]); A = (self.__Ain[:]);
+            lbA = (-100000.* ones(self.__Ain.shape[0]))[:]; ubA=(self.__Aub);
+            lb = (-100. * ones(dim_pb))[:]; ub = (100. * ones(dim_pb))[:];    
+            self._qp_solver.setProblemData(D = D , d = d, A=A, lbA=lbA, ubA=ubA, lb = lb, ub = ub, x0=None)
+            (x, imode) =  self._qp_solver.solve(D = D , d = d, A=A, lbA=lbA, ubA=ubA, lb = lb, ub = ub, x0=None)
+            return imode, x, self._qp_solver.qpTime
         
-        
-    def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None, time_step = -1, l0 = None):
+    def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None, time_step = -1, l0 = None, asLp = False):
         ''' Determine whether the system can come to a stop without changing contacts.
             Keyword arguments:
               c0 -- initial CoM position 
@@ -351,6 +374,8 @@ class BezierZeroStepCapturability(object):
               solution space.
               l0 : if equals None, angular momentum is not considered and set to 0. Else
               it becomes a variable of the problem and l0 is the initial angular momentum
+              asLp : If true, problem is solved as an LP. If false, solved as a qp that
+              minimizes distance to original point (weight of 0.001) and angular momentum if applies (weight of 1.)
             Output: An object containing the following member variables:
               is_stable -- boolean value
               c -- final com position
@@ -392,10 +417,8 @@ class BezierZeroStepCapturability(object):
         # for the moment c is random stuff.
         dim_pb = 6 if use_angular_momentum else 3
         c = zeros(dim_pb); c[2] = -1
-        wps = self.compute_6d_control_point_inequalities(T, time_step, l0)        
-        #~ self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
-        (status, x, y) = self._solver.solve(c, lb= -100. * ones(dim_pb), ub = 100. * ones(dim_pb), A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
-                
+        wps = self.compute_6d_control_point_inequalities(T, time_step, l0) 
+        status, x, comp_time = self._solve(dim_pb, asLp)
         is_stable=status==LP_status.LP_STATUS_OPTIMAL
         wps   = [self._p0,self._p1,x[:3],x[:3]]; 
         wpsL  = [zeros(3) if not use_angular_momentum else l0[:], zeros(3) if not use_angular_momentum else x[-3:] ,zeros(3),zeros(3)]; 
@@ -407,7 +430,7 @@ class BezierZeroStepCapturability(object):
         L_of_s  = bezier(matrix([pi.tolist() for pi in wpsL]).transpose())         
         
         return Bunch(is_stable=is_stable, c=x[:3], dc=zeros(3), 
-                             computation_time = self._solver.getLpTime(), ddc_min=0.0, t = T, 
+                             computation_time = comp_time, ddc_min=0.0, t = T, 
                              c_of_t = c_of_t(c_of_s, T), dc_of_t = dc_of_t(dc_of_s, T), ddc_of_t = c_of_t(ddc_of_s, T), dL_of_t = dc_of_t(dL_of_s, T), L_of_t = c_of_t(L_of_s, T),
                               wps = wps, wpsL = wpsL,  wpsdL = wpsdL);
 
