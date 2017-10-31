@@ -40,7 +40,9 @@ def is_stable(H,c=array([0.,0.,0.]), ddc=array([0.,0.,0.]), dL=array([0.,0.,0.])
     w = compute_w(c, ddc, dL, m, g_vec) 
     res = np.max(H.dot(w))
     if(res > -robustness):
-        print "offset ", res
+        print "offset ", res, dL
+        w = compute_w(c, ddc, array([0.,0.,0.]), m, g_vec) 
+        print "offset2 ", np.max(H.dot(w))
     return res<=-robustness
 
 def allZeros(t):
@@ -59,14 +61,20 @@ def __check_trajectory(p0,p1,p2,p3,T,H, mass, g, time_step = 0.1, dL = allZeros)
         return asarray(c_t(t/T)).flatten()
     def ddc_tT(t):
         return 1./(T*T) * asarray(ddc_t(t/T)).flatten()
+    def dL_tT(t):
+        return 1./(T) * asarray(dL(t/T)).flatten()
     for i in range(resolution):
         t = T * float(i) / float(resolution)
-        if not (is_stable(H,c=c_tT(t), ddc=ddc_tT(t), dL=dL(t), m = mass, g_vec=g, robustness = -0.00001)):
-            raise ValueError("trajectory is not stale !")
+        if not (is_stable(H,c=c_tT(t), ddc=ddc_tT(t), dL=dL_tT(t), m = mass, g_vec=g, robustness = -0.00001)):
+            if t > 0.1:
+                raise ValueError("trajectory is not stale ! at ", t)
+            else:
+                print is_stable(H,c=c_tT(t), ddc=ddc_tT(t), dL=asarray(dL(t/T)).flatten(), m = mass, g_vec=g, robustness = -0.00001)
+                print "failed at 0"
 
-#####################
-# EQUILIBRIUM CHECK #
-#####################
+###################
+# LP BEZIER TESTS #
+###################
 
 def test_continuous_vs_discretize(N_CONTACTS = 2, solver='qpoases', verb=0):
     
@@ -115,7 +123,7 @@ def test_continuous_vs_discretize(N_CONTACTS = 2, solver='qpoases', verb=0):
     #~ window_times =  [0.2*i for i in range(1,5)] + [0.2*i for i in range(6,11)] #try nominal time first
     #~ window_times = [1]+ [0.4*i for i in range(1,4)] #try nominal time first
     #~ window_times = [1]+ [0.4*i for i in range(3,6)] #try nominal time first
-    window_times = [1]
+    window_times = [0.7]
     found = False
     time_step_check = 0.05
     for i, el in enumerate(window_times):
@@ -192,14 +200,14 @@ def test_continuous_vs_continuous_momentum(N_CONTACTS = 2, solver='qpoases', ver
     ineq_kin = zeros(3); ineq_kin[2] = -Z_MIN
     
     
-    bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = [Ineq_kin,ineq_kin ]);
-    #~ bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = None);
+    #~ bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = [Ineq_kin,ineq_kin ]);
+    bezierSolver = BezierZeroStepCapturability("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver, kinematic_constraints = None);
     stabilitySolver = StabilityCriterion("ss", c0, dc0, p, N, mu, g_vector, mass, verb=verb, solver=solver);
     window_times = [1]+ [0.1*i for i in range(1,10)] + [0.1*i for i in range(11,21)] #try nominal time first
     #~ window_times =  [0.2*i for i in range(1,5)] + [0.2*i for i in range(6,11)] #try nominal time first
     #~ window_times = [1]+ [0.4*i for i in range(1,4)] #try nominal time first
     #~ window_times = [1]+ [0.4*i for i in range(3,6)] #try nominal time first
-    #~ window_times = [1]
+    window_times = [0.7]
     found = False
     time_step_check = -0.2
     for i, el in enumerate(window_times):
@@ -208,9 +216,9 @@ def test_continuous_vs_continuous_momentum(N_CONTACTS = 2, solver='qpoases', ver
         res = bezierSolver.can_I_stop(T=el, time_step = time_step_check);
         if (res.is_stable):
             found = True
-            #~ print "found at ", el
+            #~ print "continuous found at ", el
             __check_trajectory(bezierSolver._p0, bezierSolver._p1, res.c, res.c, el, bezierSolver._H, 
-                               bezierSolver._mass, bezierSolver._g, time_step = time_step_check, dL = res.dL_of_t)
+                               bezierSolver._mass, bezierSolver._g, time_step = time_step_check, dL = bezier(matrix([p_i.tolist() for p_i in res.wpsdL]).transpose()))
             if i != 0:
                 print "continuous Failed to stop at 1, but managed to stop at ", el
     
@@ -222,9 +230,10 @@ def test_continuous_vs_continuous_momentum(N_CONTACTS = 2, solver='qpoases', ver
         res2 = bezierSolver.can_I_stop(T=el, time_step = time_step_check, l0 = zeros(3));
         if (res2.is_stable):
             found = True
-            #~ print "found at ", el
+            #~ print "ang_momentum found at ", el
             __check_trajectory(bezierSolver._p0, bezierSolver._p1, res2.c, res2.c, el, bezierSolver._H,
-                               bezierSolver._mass, bezierSolver._g, time_step = time_step_check, dL = res2.dL_of_t)
+                               #~ bezierSolver._mass, bezierSolver._g, time_step = time_step_check, dL = res2.dL_of_t)
+                               bezierSolver._mass, bezierSolver._g, time_step = time_step_check, dL =  bezier(matrix([p_i.tolist() for p_i in res2.wpsdL]).transpose()))
             if i != 0:
                 print "ang_momentum Failed to stop at 1, but managed to stop at ", el
     #~ res2 = None
@@ -237,9 +246,9 @@ def test_continuous_vs_continuous_momentum(N_CONTACTS = 2, solver='qpoases', ver
 		if(res.is_stable):
 			print "continuous won"
 		else:
-			print "ang_momentum"
+			print "ang_momentum won"
     
-    return res.is_stable, res2.is_stable, res, res2, c0, dc0, H, h, p, N
+    return res2.is_stable, res.is_stable, res2, res, c0, dc0, H, h, p, N
 
 
 if __name__=="__main__":        
@@ -313,7 +322,7 @@ if __name__=="__main__":
         if n > len(curves_when_i_win) -1 or n < 0:
             print "n bigger than num curves or equal to -1, plotting last curve"
             n = len(curves_when_i_win) -1        
-        c0, dc0, c_end, dc_end, t_max, c_of_t, dc_of_t, ddc_of_t, H, h, p, N = curves_when_i_win[n]
+        c0, dc0, c_end, dc_end, t_max, c_of_t, dc_of_t, ddc_of_t, H, h, p, N, dl_of_t, L_of_t = curves_when_i_win[n]
         print "c0 ", c0
         print "Is c0 stable ? ", check_static_eq(H, h, mass, c0, g_vector)
         print "Is end stable ? ", check_static_eq(H, h, mass, c_of_t(t_max), g_vector)
@@ -345,9 +354,12 @@ if __name__=="__main__":
         __plot_3d_points(ax, [dc_of_t(i * delta) for i in range(num_pts)])    
         __plot_3d_points(ax, [dc0 + (dc_end-dc0)* i * delta for i in range(num_pts)], c = "y")    
         ax = fig.add_subplot(223, projection='3d')
-        __plot_3d_points(ax, [ddc_of_t(i * delta) for i in range(num_pts)])
+        #~ __plot_3d_points(ax, [ddc_of_t(i * delta) for i in range(num_pts)])
         #~ ax = fig.add_subplot(224, projection='3d')
-        __plot_3d_points(ax, [-dc0* i * delta for i in range(num_pts)], c = "y")
+        __plot_3d_points(ax, [L_of_t(i * delta) for i in range(num_pts)], c = "y")
+        #~ __plot_3d_points(ax, [-dc0* i * delta for i in range(num_pts)], c = "y")
+        ax = fig.add_subplot(224, projection='3d')
+        __plot_3d_points(ax, [dl_of_t(i * delta) for i in range(num_pts)])
         #~ ax = fig.add_subplot(121, projection='3d')
         #~ __plot_3d_points(ax, [ddc_of_t(i * delta) for i in range(num_pts)])
         #~ ax = fig.add_subplot(122, projection='3d')
@@ -370,10 +382,10 @@ if __name__=="__main__":
         plt.show()
     
     num_tested = 0.
-    for i in range(100):
+    for i in range(1000):
         num_tested = i-1
-        #~ mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test_continuous_vs_continuous_momentum()
-        mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test_continuous_vs_discretize()
+        mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test_continuous_vs_continuous_momentum()
+        #~ mine, theirs, r_mine, r_theirs, c0, dc0, H,h, p, N = test_continuous_vs_discretize()
         #~ print "H test", H.shape 
         if(mine != theirs):
             total_disagree+=1
@@ -381,8 +393,8 @@ if __name__=="__main__":
                 #~ times_disagree +=[r_mine.t]
                 #~ raise ValueError (" BITE ME " )
                 margin_i_win_he_lose+=[r_theirs.dc]
-                curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N)]
-                print "margin when he lost: ", norm(r_theirs.dc)
+                curves_when_i_win+=[(c0[:], dc0[:], r_theirs.c[:], r_theirs.dc[:], r_mine.t, r_mine.c_of_t, r_mine.dc_of_t, r_mine.ddc_of_t, H[:], h[:], p[:], N, r_mine.dL_of_t, r_mine.L_of_t)]
+                #~ print "margin when he lost: ", norm(r_theirs.dc)
             #~ else:
                 #~ times_disagree +=[r_theirs.t]
             if mine:

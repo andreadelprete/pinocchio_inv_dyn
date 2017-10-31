@@ -49,6 +49,7 @@ def __init_6D():
 
 
 def normalize(A,b=None):
+    null_rows = []
     for i in range (A.shape[0]):
         n_A = norm(A[i,:])
         if(n_A != 0.):
@@ -75,8 +76,7 @@ def compute_CWC(p, N, mass, mu):
     eq.setNewContacts(asmatrix(p),asmatrix(N),mu,EquilibriumAlgorithm.EQUILIBRIUM_ALGORITHM_PP)
     H, h = eq.getPolytopeInequalities()
     assert(norm(h) < __EPS), "h is not equal to zero"
-    #~ print "len H, ", H.shape[0]
-    return normalize(np.squeeze(np.asarray(-H)))
+    return  normalize(np.squeeze(np.asarray(-H)))
 
 #################################################
 # global constant bezier variables and methods ##
@@ -123,7 +123,8 @@ def w4(p0, p1, g, p0X, p1X, gX, alpha):
 #angular momentum waypoints
 def u0(l0, alpha):
     ux, us = __init_6D()    
-    us[3:] = alpha*l0[:]
+    ux[3:] = identity(3)* 3 * alpha
+    us[3:] = -3*alpha*l0[:]
     return  (ux, us)
     
 def u1(l0, alpha):
@@ -150,6 +151,20 @@ def u4(l0, alpha):
 wis = [w0,w1,w2,w3,w4]
 uis = [u0,u1,u2,u3,u4]
 b4 = [bernstein(4,i) for i in range(5)]
+
+      
+def c_of_t(curve, T):
+    def _eval(t):
+        return  asarray(curve(t/T)).flatten()
+    return _eval
+def dc_of_t(curve, T):
+    def _eval(t):
+        return  1/T * asarray(curve(t/T)).flatten()
+    return _eval
+def ddc_of_t(curve, T):
+    def _eval(t):
+        return  1/(T*T) * asarray(curve(t/T)).flatten()
+    return _eval
 
 #################################################
 # BezierZeroStepCapturability                  ##
@@ -240,31 +255,32 @@ class BezierZeroStepCapturability(object):
             wps = [reduce(lambda a, b : (a[0] + b[0], a[1] + b[1]), wps_bern_i) for wps_bern_i in wps_bern]
         return wps
 
-    def _init_matrices_AL_bL(self, wps, A, b):    
+    def _init_matrices_AL_bL(self, ups, A, b):    
         dimL = 0
         if self._angular_momentum_constraints != None:
             dimL = self._angular_momentum_constraints[0].shape[0]        
         AL = zeros([A.shape[0]+dimL, 6]); 
         bL = zeros([A.shape[0]+dimL   ]); 
-        AL[:A.shape[0],:3] = A
-        bL[:b.shape[0]   ] = b 
+        AL[:A.shape[0],:3] = A[:]
+        bL[:b.shape[0]   ] = b[:] 
         return AL,bL
         
     def __add_angular_momentum(self,A,b,l0, T, num_steps):       
-        wps = self.__compute_uixs(l0, T ,num_steps)    
-        AL, bL = self._init_matrices_AL_bL(wps, A, b)      
+        ups = self.__compute_uixs(l0, T ,num_steps)    
+        AL, bL = self._init_matrices_AL_bL(ups, A, b)      
         dimH  = self._H.shape[0]          
         #final matrix has num rows equal to initial matrix rows + angular momentum constraints
         # the angular momentum constraints are added AFTER the eventual kinematic ones
-        for i, (uxi, usi) in enumerate(wps):       
+        for i, (uxi, usi) in enumerate(ups):       
             AL[i*dimH : (i+1)*dimH, 3:]  = self._H.dot(uxi) #constant part of A, Ac = Ac * wxi
-            bL[i*dimH : (i+1)*dimH    ] += self._H.dot(-usi)
+            bL[i*dimH : (i+1)*dimH    ] += self._H.dot(-usi)  
         
         if self._angular_momentum_constraints != None:
             dimL = self._angular_momentum_constraints[0].shape[0]
             AL[-dimL:,3:] = self._angular_momentum_constraints[0][:]
             bL[-dimL:   ] = self._angular_momentum_constraints[1][:]
-        AL, bL = normalize(AL,bL)
+        
+        #~ AL, bL = normalize(AL,bL)
         return AL, bL
     
     def __add_kinematic_and_normalize(self,A,b, norm = True):        
@@ -376,36 +392,24 @@ class BezierZeroStepCapturability(object):
         # for the moment c is random stuff.
         dim_pb = 6 if use_angular_momentum else 3
         c = zeros(dim_pb); c[2] = -1
-        wps = self.compute_6d_control_point_inequalities(T, time_step, l0)
-        self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
+        wps = self.compute_6d_control_point_inequalities(T, time_step, l0)        
+        #~ self._solver = getNewSolver('qpoases', "name", useWarmStart=False, verb=0)
         (status, x, y) = self._solver.solve(c, lb= -100. * ones(dim_pb), ub = 100. * ones(dim_pb), A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub, A_eq=None, b=None)
-        
-        
-        
-        wps = [self._p0,self._p1,x[:3],x[:3]]; wpsraw = matrix([pi.tolist() for pi in wps]).transpose()
-        wpsL  = [zeros(3) if not use_angular_momentum else l0, zeros(3) if not use_angular_momentum else x[-3:] ,zeros(3),zeros(3)]; 
-        wpsdL = [3*(wpsL[1] - wpsL[0]) ,3*(- wpsL[1]), zeros(3)];  wpsdLraw = matrix([pi.tolist() for pi in wpsdL]).transpose()
-        c_of_s = bezier(wpsraw)
-        dc_of_s = c_of_s.compute_derivate(1)
+                
+        is_stable=status==LP_status.LP_STATUS_OPTIMAL
+        wps   = [self._p0,self._p1,x[:3],x[:3]]; 
+        wpsL  = [zeros(3) if not use_angular_momentum else l0[:], zeros(3) if not use_angular_momentum else x[-3:] ,zeros(3),zeros(3)]; 
+        wpsdL = [3*(wpsL[1] - wpsL[0]) ,3*(- wpsL[1]), zeros(3)]; 
+        c_of_s = bezier(matrix([pi.tolist() for pi in wps]).transpose())       
+        dc_of_s  = c_of_s.compute_derivate(1)
         ddc_of_s = c_of_s.compute_derivate(2)
-        dL_of_s = bezier(wpsdLraw)        
-        def c_of_t(curve):
-            def _eval(t):
-                return  asarray(curve(t/T)).flatten()
-            return _eval
-        def dc_of_t(curve):
-            def _eval(t):
-                return  1/T * asarray(curve(t/T)).flatten()
-            return _eval
-        def ddc_of_t(curve):
-            def _eval(t):
-                return  1/(T*T) * asarray(curve(t/T)).flatten()
-            return _eval
+        dL_of_s  = bezier(matrix([pi.tolist() for pi in wpsdL]).transpose())         
+        L_of_s  = bezier(matrix([pi.tolist() for pi in wpsL]).transpose())         
         
-        
-        return Bunch(is_stable=status==LP_status.LP_STATUS_OPTIMAL, c=x[:3], dc=zeros(3), 
-                             computation_time = self._solver.getLpTime(), ddc_min=0.0, t = T, c_of_t = c_of_t(c_of_s), dc_of_t = dc_of_t(dc_of_s), ddc_of_t = c_of_t(ddc_of_s),
-                             dL_of_t = dc_of_t(dL_of_s), wps = wps, wpsL = wpsL,  wpsdL = wpsdL);
+        return Bunch(is_stable=is_stable, c=x[:3], dc=zeros(3), 
+                             computation_time = self._solver.getLpTime(), ddc_min=0.0, t = T, 
+                             c_of_t = c_of_t(c_of_s, T), dc_of_t = dc_of_t(dc_of_s, T), ddc_of_t = c_of_t(ddc_of_s, T), dL_of_t = dc_of_t(dL_of_s, T), L_of_t = c_of_t(L_of_s, T),
+                              wps = wps, wpsL = wpsL,  wpsdL = wpsdL);
 
     def predict_future_state(self, t_pred, c0=None, dc0=None, MAX_ITER=1000):
         ''' Compute what the CoM state will be at the specified time instant if the system
