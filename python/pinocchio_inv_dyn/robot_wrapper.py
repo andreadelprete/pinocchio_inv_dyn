@@ -36,6 +36,8 @@ class RobotWrapper(PinocchioRobotWrapper):
         return self.data.nle
         
     def com(self, q=None, v=None, a=None, update_kinematics=True):
+        if(update_kinematics):
+            return PinocchioRobotWrapper.com(self, q, v, a);
         if q is None:
             return self.data.com[0]
         if v is not None:
