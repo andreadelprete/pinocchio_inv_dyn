@@ -115,6 +115,8 @@ def plot_inequalities(A, b, x_bounds, y_bounds, ls='--', color='k', ax=None, lw=
         else:
             pass;
 #            print "[WARNING] Could not print one inequality as all coefficients are 0: A[%d,:]=[%f,%f]" % (i,A[i,0],A[i,1]);
+    ax.set_xlim(x_bounds)
+    ax.set_ylim(y_bounds)
     return ax;
 
 ''' Plot the polytope A*x<=b with vectices V '''
