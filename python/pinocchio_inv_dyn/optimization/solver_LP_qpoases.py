@@ -66,7 +66,7 @@ class SolverLPQpOases (solver_LP_abstract.SolverLPAbstract):
         m_con = 0;
         if((A_in is not None) and (A_eq is not None)):
             m_con = A_in.shape[0] + A_eq.shape[0];
-            if(m_con != self._m_con):
+            if(m_con != self._m_con or n != self._n):
                 self._A_con = np.empty((m_con,n));
                 self._lb_con = np.empty((m_con));
                 self._ub_con = np.empty((m_con));
@@ -79,7 +79,7 @@ class SolverLPQpOases (solver_LP_abstract.SolverLPAbstract):
             self._ub_con[m_in:] = b;
         elif(A_in is not None):
             m_con = A_in.shape[0];
-            if(m_con != self._m_con):
+            if(m_con != self._m_con or n != self._n):
                 self._A_con = np.empty((m_con,n));
                 self._lb_con = np.empty((m_con));
                 self._ub_con = np.empty((m_con));
@@ -88,7 +88,7 @@ class SolverLPQpOases (solver_LP_abstract.SolverLPAbstract):
             self._ub_con[:] = Aub;
         elif(A_eq is not None):
             m_con = A_eq.shape[0];
-            if(m_con != self._m_con):
+            if(m_con != self._m_con or n != self._n):
                 self._A_con = np.empty((m_con,n));
                 self._lb_con = np.empty((m_con));
                 self._ub_con = np.empty((m_con));
@@ -97,7 +97,7 @@ class SolverLPQpOases (solver_LP_abstract.SolverLPAbstract):
             self._ub_con[:] = b;
         else:
             m_con = 0;
-            if(m_con != self._m_con):
+            if(m_con != self._m_con or n != self._n):
                 self._A_con = np.empty((m_con,n));
                 self._lb_con = np.empty((m_con));
                 self._ub_con = np.empty((m_con));
