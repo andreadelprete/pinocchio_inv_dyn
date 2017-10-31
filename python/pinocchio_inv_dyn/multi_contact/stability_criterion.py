@@ -10,15 +10,16 @@ from pinocchio_inv_dyn.optimization.solver_LP_abstract import LP_status, LP_stat
 from robust_equilibrium_DLP import RobustEquilibriumDLP
 import pinocchio_inv_dyn.plot_utils as plut
 import matplotlib.pyplot as plt
-from math import atan, pi
+from math import atan, pi, atan2
+from cmath import log
 
-from pinocchio_inv_dyn.sot_utils import qpOasesSolverMsg
+#from pinocchio_inv_dyn.sot_utils import qpOasesSolverMsg
 import numpy as np
 from numpy.linalg import norm
 from numpy import sqrt
 import cProfile
 
-np.set_printoptions(precision=2, suppress=True, linewidth=100);
+np.set_printoptions(precision=3, suppress=True, linewidth=100);
 EPS = 1e-5;
 
 class Bunch:
@@ -52,7 +53,7 @@ class StabilityCriterion(object):
     _innerIterations = 0;
     
     def __init__ (self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, 
-                  maxIter=1000, verb=0, regularization=1e-5, solver='qpoases'):
+                  contact_tangents=None, maxIter=1000, verb=0, regularization=1e-5, solver='qpoases'):
         ''' Constructor
             @param c0 Initial CoM position
             @param dc0 Initial CoM velocity
@@ -61,6 +62,7 @@ class StabilityCriterion(object):
             @param mu Friction coefficient (either a scalar or an array)
             @param g Gravity vector
             @param mass The robot mass            
+            @param contact_tangents Nx3 matrix containing the contact tangents
             @param regularization Weight of the force minimization, the higher this value, the sparser the solution
         '''
         assert mass>0.0, "Mass is not positive"
@@ -81,12 +83,20 @@ class StabilityCriterion(object):
         self._mu                = mu;
         self._contact_points    = np.asarray(contact_points).copy();
         self._contact_normals   = np.asarray(contact_normals).copy();
+        
+        if(contact_tangents is None):
+            self._contact_tangents = None;
+        else:
+            assert np.asarray(contact_tangents).shape[1]==3, "Contact tangents have not size 3"
+            assert np.asarray(contact_points).shape[0]==np.asarray(contact_tangents).shape[0], "Number of contact tangents do not match number of contact normals"
+            self._contact_tangents   = np.asarray(contact_tangents).copy();
+            
         if(norm(self._dc0)!=0.0):
             self._v = self._dc0/norm(self._dc0);
         else:
             self._v = np.array([1.0, 0.0, 0.0]);
         self._com_acc_solver  = ComAccLP(self._name+"_comAccLP", self._c0, self._v, self._contact_points, self._contact_normals, 
-                                         self._mu, self._g, self._mass, maxIter, verb-1, regularization, solver);
+                                         self._mu, self._g, self._mass, self._contact_tangents, maxIter, verb-1, regularization, solver);
         self._equilibrium_solver = RobustEquilibriumDLP(name+"_robEquiDLP", self._contact_points, self._contact_normals, 
                                                         self._mu, self._g, self._mass, verb=verb-1);
         
@@ -96,7 +106,7 @@ class StabilityCriterion(object):
         self._equilibrium_solver = RobustEquilibriumDLP(self._name, contact_points, contact_normals, mu, self._g, self._mass, verb=self._verb);
 
 
-    def can_I_stop(self, c0=None, dc0=None, T_0=0.5, MAX_ITER=1000):
+    def can_I_stop_old(self, c0=None, dc0=None, T_0=0.5, MAX_ITER=1000):
         ''' Determine whether the system can come to a stop without changing contacts.
             Keyword arguments:
               c0 -- initial CoM position 
@@ -134,6 +144,9 @@ class StabilityCriterion(object):
                 self._v = self._dc0/norm(self._dc0);
         if((c0 is not None) or (dc0 is not None)):
             self._com_acc_solver.set_com_state(self._c0, self._v);
+        
+        if(self._verb>0):
+            print "[%s] Startin algorithm with c=" % (self._name), self._c0, "v=", self._v;
             
         # Initialize: alpha=0, Dalpha=||dc0||
         t_int = 0.0;
@@ -143,7 +156,6 @@ class StabilityCriterion(object):
         self._computationTime = 0.0;
         self._outerIterations = 0;
         self._innerIterations = 0;
-        last_ddc_min = None;
         
         if(Dalpha==0.0):
             r = self._equilibrium_solver.compute_equilibrium_robustness(self._c0);
@@ -153,7 +165,7 @@ class StabilityCriterion(object):
         for iiii in range(MAX_ITER):
             if(last_iteration):
                 if(self._verb>0):
-                    print "[%s] Algorithm converged to Dalpha=%.3f" % (self._name, Dalpha);
+                    print "[%s] Algorithm converged to alpha=%.4f, Dalpha=%.4f" % (self._name, alpha, Dalpha);
                 return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int, 
                              computation_time=self._computationTime, ddc_min=0.0);
 
@@ -182,8 +194,6 @@ class StabilityCriterion(object):
             if(imode!=LP_status.OPTIMAL):
                 raise ValueError("[%s] Error while solving com acc LP: %s"%(self._name, LP_status_string[imode]))
                 
-            last_ddc_min = DDalpha_min;
-
             if(self._verb>0):
                 print "[%s] DDalpha_min=%.3f, alpha=%.3f, Dalpha=%.3f, alpha_max=%.3f, a=%.3f" % (self._name, DDalpha_min, alpha, Dalpha, alpha_max, a);
 
@@ -307,6 +317,217 @@ class StabilityCriterion(object):
             
             if(not bisection_converged):
                 raise ValueError("[%s] Bisection search did not converge in %d iterations"%(self._name, MAX_ITER));
+    
+        raise ValueError("[%s] Algorithm did not converge in %d iterations"%(self._name, MAX_ITER));
+        
+        
+    def can_I_stop(self, c0=None, dc0=None, MAX_ITER=1000):
+        ''' Determine whether the system can come to a stop without changing contacts.
+            Keyword arguments:
+              c0 -- initial CoM position 
+              dc0 -- initial CoM velocity 
+            Output: An object containing the following member variables:
+              is_stable -- boolean value
+              c -- final com position
+              dc -- final com velocity
+              ddc_min -- minimum feasible com acceleration at the final com position (to be used as a stability margin)
+              t -- time taken to reach the final com state
+              computation_time -- time taken to solve all the LPs
+        '''
+        #- Initialize: alpha=0, Dalpha=||dc0||
+        #- LOOP:
+        #    - Find min com acc for current com pos (i.e. DDalpha_min)
+        #    - If DDalpha_min>0: return False
+        #    - Find alpha_max (i.e. value of alpha corresponding to right vertex of active inequality)
+        #    - Initialize: t=T_0, t_ub=10, t_lb=0
+        #    LOOP:
+        #        - Integrate LDS until t: DDalpha = d/b - (a/d)*alpha
+        #        - if(Dalpha(t)==0 && alpha(t)<=alpha_max):  return (True, alpha(t)*v)
+        #        - if(alpha(t)==alpha_max && Dalpha(t)>0):   alpha=alpha(t), Dalpha=Dalpha(t), break
+        #        - if(alpha(t)<alpha_max && Dalpha>0):       t_lb=t, t=(t_ub+t_lb)/2
+        #        - else                                      t_ub=t, t=(t_ub+t_lb)/2
+        if(c0 is not None):
+            assert np.asarray(c0).squeeze().shape[0]==3, "CoM has not size 3"
+            self._c0 = np.asarray(c0).squeeze().copy();
+        if(dc0 is not None):
+            assert np.asarray(dc0).squeeze().shape[0]==3, "CoM velocity has not size 3"
+            self._dc0 = np.asarray(dc0).squeeze().copy();
+            if(norm(self._dc0)!=0.0):
+                self._v = self._dc0/norm(self._dc0);
+        if((c0 is not None) or (dc0 is not None)):
+            self._com_acc_solver.set_com_state(self._c0, self._v);
+            
+        if(self._verb>0):
+            print "[%s] Startin algorithm with c=" % (self._name), self._c0, "v=", self._v;
+            
+        # Initialize: alpha=0, Dalpha=||dc0||
+        t_int = 0.0;
+        alpha = 0.0;
+        Dalpha = norm(self._dc0);
+        last_iteration = False;
+        self._computationTime = 0.0;
+        self._outerIterations = 0;
+        self._innerIterations = 0;
+        
+        if(Dalpha==0.0):
+            r = self._equilibrium_solver.compute_equilibrium_robustness(self._c0);
+            return Bunch(is_stable=(r>=0.0), c=self._c0, dc=self._dc0, t=0.0, computation_time=0.0,
+                         ddc_min=None);
+
+        for iiii in range(MAX_ITER):
+            if(last_iteration):
+                if(self._verb>0):
+                    print "[%s] Algorithm converged to alpha=%.4f, Dalpha=%.4f" % (self._name, alpha, Dalpha);
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int, 
+                             computation_time=self._computationTime, ddc_min=0.0);
+
+            (imode, DDalpha_min, a, alpha_min, alpha_max) = self._com_acc_solver.compute_max_deceleration(alpha);
+            
+            self._computationTime += self._com_acc_solver.getLpTime();
+            self._outerIterations += 1;
+            
+            if(imode==LP_status.INFEASIBLE):
+                # Linear Program was not feasible, suggesting there is no feasible CoM acceleration for the given CoM position
+                if(self._verb>1):
+                    from com_acc_LP import ComAccPP
+                    self._comAccPP = None;
+                    try:
+                        self._comAccPP = ComAccPP(self._name+"_comAccPP", self._c0, self._v, self._contact_points, self._contact_normals, 
+                                                  self._mu, self._g, self._mass, verb=self._verb-1);
+                        (imode2, DDalpha_min2, a2, alpha_max2) = self._comAccPP.compute_max_deceleration(alpha);
+                    except Exception as e:
+                        print "[%s] Error while trying to compute min com acc with ComAccPP. "%(self._name)+str(e);
+                    
+                    if(self._comAccPP is not None and imode2==0):
+                        raise ValueError("[%s] Computing min com acc with PP gave different result than with LP: "%(self._name)+str(DDalpha_min2));
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int,
+                             computation_time=self._computationTime, ddc_min=None);
+
+            if(imode!=LP_status.OPTIMAL):
+                raise ValueError("[%s] Error while solving com acc LP: %s"%(self._name, LP_status_string[imode]))
+            
+            if(self._verb>0):
+                print "[{}] DDalpha_min={:.3f}, alpha={:.3f}, Dalpha={:.3f}, alpha_max={:.3f}, a={:.3f}".format(
+                        self._name, DDalpha_min, alpha, Dalpha, alpha_max, a);
+
+            if(DDalpha_min>-EPS and a>=0.0):
+                if(self._verb>0):
+                    print "[%s] Minimum com acceleration is positive from now on, so I cannot stop"%(self._name);
+                return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int,
+                             computation_time=self._computationTime, ddc_min=DDalpha_min);
+
+            # DDalpha_min is the acceleration corresponding to the current value of alpha.
+            # Compute DDalpha_0, that is the acceleration corresponding to alpha=0
+            DDalpha_0 = DDalpha_min - a*alpha;
+            
+            # If DDalpha_min becomes positive on the current segment then update 
+            # alpha_max to the point where DDalpha_min becomes zero
+            if( DDalpha_min<=0.0 and DDalpha_0 + a*alpha_max > 0.0):
+                alpha_max = -DDalpha_0 / a;
+                last_iteration = True;
+                if(self._verb>0):
+                    print "[%s] Updated alpha_max %.3f"%(self._name, alpha_max);
+            
+            if(abs(a)<EPS):
+                # if the acceleration is constant over time I can compute directly the time needed
+                # to bring the velocity to zero:
+                #     Dalpha(t) = Dalpha(0) + t*DDalpha = 0
+                #     t = -Dalpha(0)/DDalpha
+                t_zero = - Dalpha / DDalpha_min;
+                alpha_t  = alpha + t_zero*Dalpha + 0.5*t_zero*t_zero*DDalpha_min;
+                if(alpha_t <= alpha_max+EPS):
+                    if(self._verb>0):
+                        print "DDalpha_min is independent from alpha, algorithm converged to Dalpha=0";
+                    return Bunch(is_stable=True, c=self._c0+alpha_t*self._v, dc=0.0*self._v, t=t_int+t_zero,
+                                 computation_time=self._computationTime, ddc_min=DDalpha_min);
+
+                # alpha would reach alpha_max before the velocity is zero, so I must compute the time needed to reach alpha_max
+                #     alpha(t) = alpha(0) + t*Dalpha(0) + 0.5*t*t*DDalpha = alpha_max
+                #     t = (- Dalpha(0) +/- sqrt(Dalpha(0)^2 - 2*DDalpha(alpha(0)-alpha_max))) / DDalpha;
+                # where DDalpha = -d[i_DDalpha_min]
+                # Having two solutions, we take the smallest one because we want to find the first time
+                # at which alpha reaches alpha_max
+                delta = sqrt(Dalpha**2 - 2*DDalpha_min*(alpha-alpha_max))
+                t = ( - Dalpha + delta) / DDalpha_min;
+                if(t<0.0):
+                    # If the smallest time at which alpha reaches alpha_max is negative print a WARNING because this should not happen
+                    print "[{}] WARNING: Time is negative: t={:.3f}, alpha={:.3f}, Dalpha={:.3f}, DDalpha_min={:.3f}, alpha_max={:.3f}".format(
+                            self._name,t,alpha,Dalpha,DDalpha_min,alpha_max);
+                    t = (-Dalpha - delta) / DDalpha_min;
+                    if(t<0.0):
+                        raise ValueError("[{}] ERROR: Time is still negative: t={:.3f}, alpha={:.3f}, Dalpha={:.3f}, DDalpha_min={:.3f}, alpha_max={:.3f}".format(
+                                          self._name,t,alpha,Dalpha,DDalpha_min,alpha_max));
+                Dalpha += t*DDalpha_min;
+                alpha = alpha_max+EPS;                
+                t_int += t;                    
+            else:
+                # Try to compute the time at which the velocity will be zero:
+                #   Dalpha(t) = omega*sh*alpha + ch*Dalpha + omega*sh*(DDalpha_0/a) = 0
+                #   omega*th*alpha + Dalpha + omega*th*(DDalpha_0/a) = 0
+                #   th*omega*(alpha + DDalpha_0/a) = - Dalpha
+                #   tanh(omega*t) = - Dalpha / (omega*(alpha + DDalpha_0/a))
+                #   omega*t = atanh(- Dalpha / (omega*(alpha + DDalpha_0/a)))
+                #   t = atanh(- Dalpha / (omega*(alpha + DDalpha_0/a))) / omega
+                omega = sqrt(a+0j);
+                tmp = - Dalpha / (omega*(alpha + (DDalpha_0/a)));
+                if(abs(np.real(tmp))<1.0):
+                    t = np.arctanh(tmp) / omega;
+                    if(abs(np.imag(t)) > EPS):
+                        raise ValueError("[%s] ERROR time to reach zero vel is imaginary: "%self._name +str(t)+"a=%.3f"%(a));
+                    t = t.real;
+                    if(t<0.0):
+                        if(a<0.0):
+                            # if a is negative then its square root has to solutions
+                            # by choosing the other one we would get the opposite value for t
+                            t = -t;
+                        else:
+                            raise ValueError("[%s] ERROR time to reach zero vel is negative: "%self._name +str(t));
+                    sh = np.sinh(omega*t);
+                    ch = np.cosh(omega*t);
+                    alpha_t  = ch*alpha + sh*Dalpha/omega - (1.0-ch)*(DDalpha_0/a);
+                    alpha_t = alpha_t.real;
+                    if(alpha_t <= alpha_max+EPS):
+                        if(self._verb>0):
+                            print "[%s] Algorithm converged to Dalpha=0"%self._name;
+                        t_int += t;
+                        return Bunch(is_stable=True, c=self._c0+alpha_t*self._v, dc=0.0*self._v, t=t_int,
+                                     computation_time=self._computationTime, ddc_min=DDalpha_0+a*alpha_t);
+                else:
+                    # Here I already know that I won't be able to stop, but I keep integrating to find the min velocity I can reach.
+                    if(self._verb>0):
+                        print "[%s] INFO argument of arctanh greater than 1 (%.3f), meaning that zero vel will never be reached"%(self._name,np.real(tmp));  
+                    #return Bunch(is_stable=False, c=self._c0+alpha*self._v, dc=Dalpha*self._v, t=t_int);
+                        
+                # alpha would reach alpha_max before the velocity is zero, so I must compute the time needed to reach alpha_max
+                A = alpha + DDalpha_0/a; # beta = DDalpha_0, gamma = a
+                B = Dalpha / omega;
+                C = - alpha_max - DDalpha_0/a;
+                delta = B*B + C*C - A*A;
+                if(a>0.0):
+                    arg = (sqrt(delta) - C) / (A+B);
+                else:
+                    arg = (-sqrt(delta) - C) / (A+B);
+                t = log(arg) / omega;
+                if(abs(t.imag)>EPS):
+                    raise ValueError("[%s] ERROR time to reach alpha_max is imaginary: "%self._name +str(t));
+                t = np.real(t);
+                sh = np.sinh(omega*t);
+                ch = np.cosh(omega*t);
+                alpha_t  = ch*alpha + sh*Dalpha/omega - (1.0-ch)*(DDalpha_0/a);
+                Dalpha_t = omega*sh*alpha + ch*Dalpha + omega*sh*(DDalpha_0/a);
+                alpha_t = alpha_t.real;
+                if(abs(alpha_t-alpha_max)>EPS):
+                    raise ValueError("[%s] The analytical integration to get to alpha_max (%.3f) did not lead to the expected value: %.3f"%(
+                                        self._name, alpha_max, alpha_t));
+
+                if(Dalpha_t.real<0.0):
+                    # Integrating up to alpha_max led to a negative velocity!
+                    err = "[{}] Integrating up to alpha_max led to a negative velocity: {:.3f}".format(self._name, Dalpha_t.real);
+                    raise ValueError(err);
+                    
+                alpha = alpha_max+EPS;
+                Dalpha = Dalpha_t.real;
+                t_int += t;
     
         raise ValueError("[%s] Algorithm did not converge in %d iterations"%(self._name, MAX_ITER));
 
@@ -488,7 +709,7 @@ class StabilityCriterion(object):
     
 def test(N_CONTACTS = 2, solver='qpoases', verb=0):
     from pinocchio_inv_dyn.multi_contact.utils import generate_contacts, compute_GIWC, find_static_equilibrium_com, can_I_stop
-    DO_PLOTS = True;
+    DO_PLOTS = False;
     PLOT_3D = False;
     mass = 75;             # mass of the robot
     mu = 0.5;           # friction coefficient
@@ -567,29 +788,54 @@ def test(N_CONTACTS = 2, solver='qpoases', verb=0):
         try:
             res = stabilitySolver.can_I_stop();
         except Exception as e:
+            stabilitySolver._verb = 0;
             raise
-        
+            
     try:
-        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
-        if((res.is_stable != has_stopped2) or 
-            not np.allclose(res.c, c_final2, atol=1e-3) or 
-            not np.allclose(res.dc, dc_final2, atol=1e-3)):
-            print "\nERROR: the two algorithms gave different results!"
-            print "New algorithm:", res.is_stable, res.c, res.dc;
-            print "Old algorithm:", has_stopped2, c_final2, dc_final2;
-            print "Errors:", norm(res.c-c_final2), norm(res.dc-dc_final2), "\n";
+        res_old = stabilitySolver.can_I_stop_old();
     except Exception as e:
-        print "\n\n *** Old algorithm failed: ", e
-        print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
+        print "\n *** Old algorithm failed:", e,"\nRe-running the algorithm with high verbosity\n"
+        stabilitySolver._verb = 1;
+        try:
+            res_old = stabilitySolver.can_I_stop();
+        except Exception as e:
+            stabilitySolver._verb = 0;
+            raise
+    
+    if((res.is_stable != res_old.is_stable) or not np.allclose(res.c, res_old.c, atol=1e-3) or not np.allclose(res.dc, res_old.dc, atol=1e-3)):
+        print "\nERROR: the two algorithms gave different results!"
+        print "New algorithm:", res.is_stable, res.c, res.dc;
+        print "Old algorithm:", res_old.is_stable, res_old.c, res_old.dc;
+        print "Errors:", norm(res.c-res_old.c), norm(res.dc-res_old.dc), "\n";
+        
+        print "\nRe-running the new algorithm with high verbosity\n"
+        stabilitySolver._verb = 1;
+        res = stabilitySolver.can_I_stop();
+        print "\nRe-running the old algorithm with high verbosity\n"
+        res = stabilitySolver.can_I_stop();
+        stabilitySolver._verb = 0;
+            
+#    try:
+#        (has_stopped2, c_final2, dc_final2) = can_I_stop(c0, dc0, p, N, mu, mass, 1.0, 100, verb=verb, DO_PLOTS=DO_PLOTS);
+#        if((res.is_stable != has_stopped2) or 
+#            not np.allclose(res.c, c_final2, atol=1e-3) or 
+#            not np.allclose(res.dc, dc_final2, atol=1e-3)):
+#            print "\nERROR: the two algorithms gave different results!"
+#            print "New algorithm:", res.is_stable, res.c, res.dc;
+#            print "Old algorithm:", has_stopped2, c_final2, dc_final2;
+#            print "Errors:", norm(res.c-c_final2), norm(res.dc-dc_final2), "\n";
+#    except Exception as e:
+#        print "\n\n *** Old algorithm failed: ", e
+#        print "Results of new algorithm is", res.is_stable, "c0", c0, "dc0", dc0, "cFinal", res.c, "dcFinal", res.dc,"\n";
         
     return (stabilitySolver._computationTime, stabilitySolver._outerIterations, stabilitySolver._innerIterations);
         
 
 if __name__=="__main__":
     N_CONTACTS = 2;
-    SOLVER = 'cvxopt'; # cvxopt
+    SOLVER = 'qpoases'; # cvxopt, qpoases
     VERB = 0;
-    N_TESTS = range(0,10);
+    N_TESTS = range(2000, 3000);
     time    = np.zeros(len(N_TESTS));
     outIter = np.zeros(len(N_TESTS));
     inIter  = np.zeros(len(N_TESTS));
