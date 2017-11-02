@@ -74,17 +74,18 @@ class AbstractSolver (object):
         self.maxIter    = maxIter;
         self.verb       = verb;
         self.qpOasesAnalyser= SolutionAnalysis();
-        self.changeInequalityNumber(m_in);
+        self.changeInequalityNumber(m_in, n);
         return;
         
     def setSoftInequalityIndexes(self, indexes):
         self.softInequalityIndexes = indexes;
                 
-    def changeInequalityNumber(self, m_in):
+    def changeInequalityNumber(self, m_in, n):
 #        print "[%s] Changing number of inequality constraints from %d to %d" % (self.name, self.m_in, m_in);
-        if(m_in==self.m_in):
+        if(m_in==self.m_in and n == self.n):
             return;
         self.m_in       = m_in;
+        self.n          = n;
         self.iter       = 0;
         self.qpOasesSolver  = SQProblem(self.n,m_in); #, HessianType.POSDEF SEMIDEF
         self.options             = Options();
@@ -460,7 +461,7 @@ class AbstractSolver (object):
         return (hess, hess_fd);
         
     def print_qp_oases_error_message(self, imode, solver_name):
-        if(imode!=0 and imode!=PyReturnValue.MAX_NWSR_REACHED):
+        if(self.verb > 0 and imode!=0 and imode!=PyReturnValue.MAX_NWSR_REACHED):
             if(imode==PyReturnValue.HOTSTART_STOPPED_INFEASIBILITY):
                 print "[%s] ERROR Qp oases HOTSTART_STOPPED_INFEASIBILITY" % solver_name; # 61
             elif(imode==PyReturnValue.MAX_NWSR_REACHED):
