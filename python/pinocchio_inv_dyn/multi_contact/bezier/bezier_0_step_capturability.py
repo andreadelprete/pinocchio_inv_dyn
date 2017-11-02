@@ -16,7 +16,7 @@ from numpy import array, vstack, zeros, ones, sqrt, matrix, asmatrix, asarray, i
 from numpy import cross as X
 from numpy.linalg import norm
 import numpy as np
-from math import atan, pi
+from math import atan, pi, sqrt
 
 import cProfile
 
@@ -338,7 +338,7 @@ class BezierZeroStepCapturability(object):
         
             
     
-    def _solve(self, dim_pb, asLp = False, guess = None ):
+    def _solve(self, dim_pb, l0, asLp = False, guess = None ):
         if asLp:
             c = zeros(dim_pb); c[2] = -1
             (status, x, y) = self._lp_solver.solve(c, lb= -100. * ones(dim_pb), ub = 100. * ones(dim_pb),
@@ -350,10 +350,16 @@ class BezierZeroStepCapturability(object):
             self._qp_solver.changeInequalityNumber(self.__Ain.shape[0], dim_pb)
             weight_dist_or = 0.001
             D = identity(dim_pb); 
+            alpha = sqrt(6./35.) 
             for i in range(3):
                 D[i,i] = weight_dist_or
             d = zeros(dim_pb);
             d[:3]= self._p0 * weight_dist_or
+            if(l0 != None):
+                # minimizing integral of angular momentum 
+                for i in range(3,6):
+                    D[i,i-3] = alpha
+                d[3:]= - l0 / (7 * alpha)
             D = (D[:]); d = (d[:]); A = (self.__Ain[:]);
             lbA = (-100000.* ones(self.__Ain.shape[0]))[:]; ubA=(self.__Aub);
             lb = (-100. * ones(dim_pb))[:]; ub = (100. * ones(dim_pb))[:];    
@@ -418,7 +424,7 @@ class BezierZeroStepCapturability(object):
         dim_pb = 6 if use_angular_momentum else 3
         c = zeros(dim_pb); c[2] = -1
         wps = self.compute_6d_control_point_inequalities(T, time_step, l0) 
-        status, x, comp_time = self._solve(dim_pb, asLp)
+        status, x, comp_time = self._solve(dim_pb, l0, asLp)
         is_stable=status==LP_status.LP_STATUS_OPTIMAL
         wps   = [self._p0,self._p1,x[:3],x[:3]]; 
         wpsL  = [zeros(3) if not use_angular_momentum else l0[:], zeros(3) if not use_angular_momentum else x[-3:] ,zeros(3),zeros(3)]; 
