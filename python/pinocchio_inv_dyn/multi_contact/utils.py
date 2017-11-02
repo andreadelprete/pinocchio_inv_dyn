@@ -9,6 +9,7 @@ from pinocchio_inv_dyn.polytope_conversion_utils import crossMatrix, cone_span_t
 from pinocchio_inv_dyn.geom_utils import is_vector_inside_cone, plot_inequalities
 from pinocchio_inv_dyn.transformations import euler_matrix
 
+import pinocchio as se3
 import pinocchio_inv_dyn.plot_utils as plut
 import matplotlib.pyplot as plt
 from math import atan, pi
@@ -21,7 +22,7 @@ import cProfile
 
 EPS = 1e-5;
 
-def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
+def compute_centroidal_cone_generators(contact_points, contact_normals, mu, contact_tangents=None):
     ''' Compute two matrices. The first one contains the 6d generators of the
         centroidal cone. The second one contains the 3d generators of the 
         contact cones (4 generators for each contact point).
@@ -31,6 +32,11 @@ def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
     assert contact_points.shape[0]==contact_normals.shape[0], "Size of contact_points and contact_normals do not match"
     contact_points = np.asarray(contact_points);
     contact_normals = np.asarray(contact_normals);
+    if(contact_tangents is not None):
+        assert contact_tangents.shape[1]==3, "Wrong size of contact_tangents"
+        assert contact_points.shape[0]==contact_tangents.shape[0], "Size of contact_points and contact_tangents do not match"
+        contact_tangents = np.asarray(contact_tangents);
+    
     nContacts = contact_points.shape[0];
     cg = 4;                         # number of generators for each friction cone
     nGen = nContacts*cg;            # total number of generators
@@ -44,14 +50,20 @@ def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
     P[:3,:] = -np.identity(3);
     muu = mu/sqrt(2.0);
     for i in range(nContacts):
-        # compute tangent directions
         assert norm(contact_normals[i,:])!=0.0, "Length of contact normals cannot be zero"
         contact_normals[i,:]  = contact_normals[i,:]/norm(contact_normals[i,:]);
-        T1 = np.cross(contact_normals[i,:], [0.,1.,0.]);
-        if(norm(T1)<EPS):
+
+        # compute tangent directions
+        if(contact_tangents is None):
             T1 = np.cross(contact_normals[i,:], [1.,0.,0.]);
+            if(norm(T1)<EPS):
+                T1 = np.cross(contact_normals[i,:], [0.,1.,0.]);
+        else:
+            assert norm(contact_tangents[i,:])!=0.0, "Length of contact tangents cannot be zero"
+            T1 = contact_tangents[i,:];
         T1 = T1/norm(T1);
         T2 = np.cross(contact_normals[i,:], T1);
+        
         G[:,cg*i+0] =  muu[i]*T1 + muu[i]*T2 + contact_normals[i,:];
         G[:,cg*i+1] =  muu[i]*T1 - muu[i]*T2 + contact_normals[i,:];
         G[:,cg*i+2] = -muu[i]*T1 + muu[i]*T2 + contact_normals[i,:];
@@ -60,7 +72,7 @@ def compute_centroidal_cone_generators(contact_points, contact_normals, mu):
         P[3:,:] = -crossMatrix(contact_points[i,:]);
         # project generators in 6d centroidal space
         A[:,cg*i:cg*i+cg] = np.dot(P, G[:,cg*i:cg*i+cg]);
-    
+
     # normalize generators
     for i in range(nGen):
         G[:,i] /= norm(G[:,i]);
@@ -151,21 +163,30 @@ def generate_contacts(N_CONTACTS, lx, ly, mu, CONTACT_POINT_LOWER_BOUNDS, CONTAC
 
 
 
-def compute_GIWC(contact_points, contact_normals, mu, eliminate_redundancies=False, USE_DIAGONAL_GENERATORS=True):
+def compute_GIWC(contact_points, contact_normals, mu, contact_tangents=None, eliminate_redundancies=False):
     ''' Compute the gravito-inertial wrench cone (i.e. the centroidal cone).
         @param contact_points Nx3 matrix containing the contact points
         @param contact_normals Nx3 matrix containing the contact normals
         @param mu A scalar friction coefficient, or an array of friction coefficients (one for each contact point)
-        @param cg Number of generator for the friction cone of each contact point
-        @param USE_DIAGONAL_GENERATORS If True generate the generators turned of 45 degrees
+        @param contact_tangents Nx3 matrix containing the contact tangents
         @return (H,h) Matrix and vector defining the GIWC as H*w <= h
+        @note If the first tangent direction is specified through the optional parameter contact_tangents,
+              the second tangent direction is computed as the cross product between normal and first tangent
+              direction. The reason for specifying the contact_tangents is to get a specific linearization
+              of the friction cones.
     '''
-    (S_centr, S) = compute_centroidal_cone_generators(contact_points, contact_normals, mu);
+    (S_centr, S) = compute_centroidal_cone_generators(contact_points, contact_normals, mu, contact_tangents);
     # convert generators to inequalities
     H = cone_span_to_face(S_centr,eliminate_redundancies);
     h = np.zeros(H.shape[0]);
+
+    # normalize inequalities
+    for i in range(H.shape[0]):
+        norm_Hi = norm(H[i,:])
+        if(norm_Hi>1e-9):
+            H[i,:] /= norm_Hi;
     return (H,h);
-    
+
     
 def compute_support_polygon(H, h, mass, g_vector, eliminate_redundancies=False):
     ''' Compute the 2d support polygon A*c<=b given the gravito-inertial wrench 

@@ -41,7 +41,8 @@ class EquilibriumExtremumLP (object):
     
     epsilon = np.sqrt(np.finfo(float).eps);
 
-    def __init__ (self, name, contact_points, contact_normals, mu, g, mass, a, a0, maxIter=100, verb=0, solver='cvxopt'):
+    def __init__ (self, name, contact_points, contact_normals, mu, g, mass, a, a0, 
+                  contact_tangents=None, maxIter=100, verb=0, solver='cvxopt'):
         self.name       = name;
         self.solver     = optim.getNewSolver(solver, name, maxIter=maxIter, verb=verb);
         self.maxIter    = maxIter;
@@ -51,7 +52,7 @@ class EquilibriumExtremumLP (object):
         self.a0         = np.asarray(a0).squeeze().copy();
         
         # compute matrix A, which maps the force generator coefficients into the centroidal wrench
-        (self.A, G4) = compute_centroidal_cone_generators(contact_points, contact_normals, mu);
+        (self.A, G4) = compute_centroidal_cone_generators(contact_points, contact_normals, mu, contact_tangents);
         self.D = np.zeros((6,3));
         self.d = np.zeros(6);
         self.D[3:,:] = -mass*crossMatrix(g);

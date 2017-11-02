@@ -115,7 +115,7 @@ class SolverLPQpOases (solver_LP_abstract.SolverLPAbstract):
         maxActiveSetIter    = np.array([self._maxIter]);
         maxComputationTime  = np.array(self._maxTime);
 
-        if(not self._initialized):
+        if(not self._useWarmStart or not self._initialized):
             self._imode = self._qpOasesSolver.init(self._Hess, c, self._A_con, lb, ub, self._lb_con, 
                                                    self._ub_con, maxActiveSetIter, maxComputationTime);
         else:

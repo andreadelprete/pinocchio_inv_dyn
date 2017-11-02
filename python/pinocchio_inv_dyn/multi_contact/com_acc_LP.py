@@ -55,12 +55,13 @@ class ComAccLP (object):
     solver = None;
     
     def __init__ (self, name, c0, v, contact_points, contact_normals, mu, g, mass, 
-                  maxIter=10000, verb=0, regularization=1e-5, solver='qpoases'):
+                  contact_tangents=None, maxIter=10000, verb=0, regularization=1e-5, solver='qpoases'):
         ''' Constructor
             @param c0 Initial CoM position
             @param v Opposite of the direction in which you want to maximize the CoM acceleration (typically that would be
                                                                                                    the CoM velocity direction)
             @param g Gravity vector
+            @param contact_tangents Nx3 matrix containing the contact tangents
             @param regularization Weight of the force minimization, the higher this value, the sparser the solution
             @param solver Specify which LP solver to use (qpoases, cvxopt or scipy)
         '''
@@ -68,6 +69,7 @@ class ComAccLP (object):
         self.verb       = verb;
         self.m_in       = 6;
         self.solver = optim.getNewSolver(solver, name, maxIter=maxIter, verb=verb);
+        self.solver.setUseWarmStart(False);
         self.hessian_regularization = INITIAL_HESSIAN_REGULARIZATION;
         self.b = np.zeros(6);
         self.d = np.empty(6);
@@ -75,7 +77,7 @@ class ComAccLP (object):
         self.v = np.empty(3);
         self.constrUB = np.zeros(self.m_in)+1e100;
 #        self.constrLB = np.zeros(self.m_in)-1e100;
-        self.set_problem_data(c0, v, contact_points, contact_normals, mu, g, mass, regularization);
+        self.set_problem_data(c0, v, contact_points, contact_normals, mu, g, mass, contact_tangents, regularization);
 
 
     def set_com_state(self, c0, v):
@@ -94,9 +96,9 @@ class ComAccLP (object):
         self.d[3:] = self.mass*np.cross(c0, self.g);
 
 
-    def set_contacts(self, contact_points, contact_normals, mu, regularization=1e-5):
+    def set_contacts(self, contact_points, contact_normals, mu, contact_tangents=None, regularization=1e-5):
         # compute matrix A, which maps the force generator coefficients into the centroidal wrench
-        (self.A, self.G4) = compute_centroidal_cone_generators(contact_points, contact_normals, mu);
+        (self.A, self.G4) = compute_centroidal_cone_generators(contact_points, contact_normals, mu, contact_tangents);
         
         # since the size of the problem may have changed we need to recreate the solver and all the problem matrices/vectors
         if(self.n != contact_points.shape[0]*4 + 1):
@@ -116,12 +118,12 @@ class ComAccLP (object):
         self.constrMat[:,:-1] = self.A;
 
 
-    def set_problem_data(self, c0, v, contact_points, contact_normals, mu, g, mass, regularization=1e-5):
+    def set_problem_data(self, c0, v, contact_points, contact_normals, mu, g, mass, contact_tangents=None, regularization=1e-5):
         assert np.asarray(g).squeeze().shape[0]==3, "Gravity vector has not size 3"
         assert mass>0.0, "Mass is not positive"
         self.mass = mass;
         self.g = np.asarray(g).squeeze().copy();
-        self.set_contacts(contact_points, contact_normals, mu, regularization);
+        self.set_contacts(contact_points, contact_normals, mu, contact_tangents, regularization);
         self.set_com_state(c0, v);
 
     def compute_x_kkt(self):
