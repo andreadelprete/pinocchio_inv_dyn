@@ -71,10 +71,13 @@ def normalize(A,b=None):
 #  \param mu friction coefficient
 #  \return the CWC H, H w <= 0, where w is the wrench. [WARNING!] TODO: The H matrix is such that 
 #  the wrench w is the one present in the ICRA paper 15 of del prete et al., contrary to the current c++ implementation
-def compute_CWC(p, N, mass, mu):    
+def compute_CWC(p, N, mass, mu, T=None):    
     __cg = 4; #num generators per contact
     eq = Equilibrium("dyn_eq2", mass, __cg) 
-    eq.setNewContacts(asmatrix(p),asmatrix(N),mu,EquilibriumAlgorithm.EQUILIBRIUM_ALGORITHM_PP)
+    if T == None:
+        eq.setNewContacts(asmatrix(p),asmatrix(N),mu,EquilibriumAlgorithm.EQUILIBRIUM_ALGORITHM_PP)
+    else:
+        eq.setNewContactsWithTangents(asmatrix(p),asmatrix(N),asmatrix(T),mu,EquilibriumAlgorithm.EQUILIBRIUM_ALGORITHM_PP)
     H, h = eq.getPolytopeInequalities()
     assert(norm(h) < __EPS), "h is not equal to zero"
     return  normalize(np.squeeze(np.asarray(-H)))
@@ -183,7 +186,7 @@ class BezierZeroStepCapturability(object):
     _innerIterations = 0;
     
     def __init__ (self, name, c0, dc0, contact_points, contact_normals, mu, g, mass, kinematic_constraints = None, angular_momentum_constraints = None,
-                  CWC = None, maxIter=1000, verb=0, regularization=1e-5, solver='qpoases'):
+                  contactTangents = None, maxIter=1000, verb=0, regularization=1e-5, solver='qpoases'):
         ''' Constructor
             @param c0 Initial CoM position
             @param dc0 Initial CoM velocity
@@ -211,7 +214,7 @@ class BezierZeroStepCapturability(object):
         self._g                 = np.asarray(g).squeeze().copy();
         self._gX  = skew(self._g )
 #        self._regularization    = regularization;
-        self.set_contacts(contact_points, contact_normals, mu, CWC)
+        self.set_contacts(contact_points, contact_normals, mu, contactTangents)
         if kinematic_constraints != None:
             self._kinematic_constraints = kinematic_constraints[:]
         else:
@@ -231,11 +234,11 @@ class BezierZeroStepCapturability(object):
         self._p0X = skew(c0)
         self._p1X = skew(self._p1)
 
-    def set_contacts(self, contact_points, contact_normals, mu, CWC):
+    def set_contacts(self, contact_points, contact_normals, mu, contactTangents):
         self._contact_points    = np.asarray(contact_points).copy();
         self._contact_normals   = np.asarray(contact_normals).copy();
         self._mu                = mu;
-        self._H                 = CWC if CWC !=None else compute_CWC(self._contact_points, self._contact_normals, self._mass, mu)#CWC inequality matrix
+        self._H                 = compute_CWC(self._contact_points, self._contact_normals, self._mass, mu, contactTangents)#CWC inequality matrix
                        
                           
     def __compute_wixs(self, T, num_step = -1):        
@@ -339,12 +342,13 @@ class BezierZeroStepCapturability(object):
             
     
     def _solve(self, dim_pb, l0, asLp = False, guess = None ):
+        cost = 0
         if asLp:
             c = zeros(dim_pb); c[2] = -1
             (status, x, y) = self._lp_solver.solve(c, lb= -100. * ones(dim_pb), ub = 100. * ones(dim_pb),
                                                        A_in=self.__Ain, Alb=-100000.* ones(self.__Ain.shape[0]), Aub=self.__Aub,
                                                        A_eq=None, b=None)
-            return status, x, self._lp_solver.getLpTime()
+            return status, x, cost, self._lp_solver.getLpTime()
         else:
             #~ self._qp_solver = qp_solver(dim_pb, self.__Ain.shape[0], solver='qpoases', accuracy=1e-6, maxIter=100, verb=0)
             self._qp_solver.changeInequalityNumber(self.__Ain.shape[0], dim_pb)
@@ -365,7 +369,11 @@ class BezierZeroStepCapturability(object):
             lb = (-100. * ones(dim_pb))[:]; ub = (100. * ones(dim_pb))[:];    
             self._qp_solver.setProblemData(D = D , d = d, A=A, lbA=lbA, ubA=ubA, lb = lb, ub = ub, x0=None)
             (x, imode) =  self._qp_solver.solve(D = D , d = d, A=A, lbA=lbA, ubA=ubA, lb = lb, ub = ub, x0=None)
-            return imode, x, self._qp_solver.qpTime
+            if l0 == None:
+                cost = norm(self._p0 - x)
+            else
+                cost = (1./7.)*(l0.dot(l0) + l0.dot(x[3:]) + x[3:].dot(x[3:]) * 3. / 5.)
+            return imode, x, cost , self._qp_solver.qpTime
         
     def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None, time_step = -1, l0 = None, asLp = False):
         ''' Determine whether the system can come to a stop without changing contacts.
@@ -424,7 +432,7 @@ class BezierZeroStepCapturability(object):
         dim_pb = 6 if use_angular_momentum else 3
         c = zeros(dim_pb); c[2] = -1
         wps = self.compute_6d_control_point_inequalities(T, time_step, l0) 
-        status, x, comp_time = self._solve(dim_pb, l0, asLp)
+        status, x, cost, comp_time = self._solve(dim_pb, l0, asLp)
         is_stable=status==LP_status.LP_STATUS_OPTIMAL
         wps   = [self._p0,self._p1,x[:3],x[:3]]; 
         wpsL  = [zeros(3) if not use_angular_momentum else l0[:], zeros(3) if not use_angular_momentum else x[-3:] ,zeros(3),zeros(3)]; 
@@ -438,7 +446,7 @@ class BezierZeroStepCapturability(object):
         return Bunch(is_stable=is_stable, c=x[:3], dc=zeros(3), 
                              computation_time = comp_time, ddc_min=0.0, t = T, 
                              c_of_t = c_of_t(c_of_s, T), dc_of_t = dc_of_t(dc_of_s, T), ddc_of_t = c_of_t(ddc_of_s, T), dL_of_t = dc_of_t(dL_of_s, T), L_of_t = c_of_t(L_of_s, T),
-                              wps = wps, wpsL = wpsL,  wpsdL = wpsdL);
+                              cost = cost, wps = wps, wpsL = wpsL,  wpsdL = wpsdL);
 
     def predict_future_state(self, t_pred, c0=None, dc0=None, MAX_ITER=1000):
         ''' Compute what the CoM state will be at the specified time instant if the system
