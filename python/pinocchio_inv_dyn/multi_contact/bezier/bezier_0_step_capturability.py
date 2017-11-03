@@ -354,7 +354,7 @@ class BezierZeroStepCapturability(object):
             self._qp_solver.changeInequalityNumber(self.__Ain.shape[0], dim_pb)
             weight_dist_or = 0.001
             D = identity(dim_pb); 
-            alpha = sqrt(6./35.) 
+            alpha = sqrt(12./5.) 
             for i in range(3):
                 D[i,i] = weight_dist_or
             d = zeros(dim_pb);
@@ -363,7 +363,7 @@ class BezierZeroStepCapturability(object):
                 # minimizing integral of angular momentum 
                 for i in range(3,6):
                     D[i,i-3] = alpha
-                d[3:]= - l0 / (7 * alpha)
+                d[3:]= (9.* l0) / (5. * alpha)
             D = (D[:]); d = (d[:]); A = (self.__Ain[:]);
             lbA = (-100000.* ones(self.__Ain.shape[0]))[:]; ubA=(self.__Aub);
             lb = (-100. * ones(dim_pb))[:]; ub = (100. * ones(dim_pb))[:];    
@@ -371,8 +371,8 @@ class BezierZeroStepCapturability(object):
             (x, imode) =  self._qp_solver.solve(D = D , d = d, A=A, lbA=lbA, ubA=ubA, lb = lb, ub = ub, x0=None)
             if l0 == None:
                 cost = norm(self._p0 - x)
-            else
-                cost = (1./7.)*(l0.dot(l0) + l0.dot(x[3:]) + x[3:].dot(x[3:]) * 3. / 5.)
+            else:
+                cost = (1./5.)*(9.*l0.dot(l0) -  9.*l0.dot(x[3:]) + 6.*x[3:].dot(x[3:]))
             return imode, x, cost , self._qp_solver.qpTime
         
     def can_I_stop(self, c0=None, dc0=None, T=1., MAX_ITER=None, time_step = -1, l0 = None, asLp = False):
