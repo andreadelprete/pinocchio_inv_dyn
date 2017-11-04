@@ -238,7 +238,7 @@ class CoMTaskWithAccelerationScaling(Task):
       D[:,1] = mat_cross(D[:,0], np.matrix([0.0, 1.0, 0.0]).T);
     D[:,1] *= self.weight/norm(D[:,1]);
     D[:,2] = mat_cross(D[:,0], D[:,1]);
-    D[:,2] *= self.weight;
+    D[:,2] *= self.weight/norm(D[:,2]);
 
     J     = D.T*J;
     drift = D.T*drift;
