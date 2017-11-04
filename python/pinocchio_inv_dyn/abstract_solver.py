@@ -80,8 +80,10 @@ class AbstractSolver (object):
     def setSoftInequalityIndexes(self, indexes):
         self.softInequalityIndexes = indexes;
                 
-    def changeInequalityNumber(self, m_in, n):
+    def changeInequalityNumber(self, m_in, n=None):
 #        print "[%s] Changing number of inequality constraints from %d to %d" % (self.name, self.m_in, m_in);
+        if(n is None):
+            n = self.n;
         if(m_in==self.m_in and n == self.n):
             return;
         self.m_in       = m_in;
