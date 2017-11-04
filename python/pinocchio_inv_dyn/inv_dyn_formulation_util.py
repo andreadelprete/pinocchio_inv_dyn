@@ -207,7 +207,7 @@ class InvDynFormulation (object):
         self.dt = dt;
         self.t = 0.0;
         self.name = name;
-        self.Md = zeros((self.na,self.na)); #np.diag([ g*g*i for (i,g) in zip(INERTIA_ROTOR,GEAR_RATIO) ]); # rotor inertia
+        self.Md = zeros((self.na,self.na));
         
         ''' create low-pass filter for base velocities '''
         self.baseVelocityFilter = FirstOrderLowPassFilter(dt, self.BASE_VEL_FILTER_CUT_FREQ , zeros(6));            
@@ -234,6 +234,8 @@ class InvDynFormulation (object):
         self.updateInequalityData(updateConstrainedDynamics=False);
         self.setNewSensorData(0, q, v);        
         
+    def setRotorInertias(self, rotor_inertias, gear_ratios):
+        self.Md = np.diag([ g*g*i for (i,g) in zip(rotor_inertias, gear_ratios) ]);
         
         
     def getFrameId(self, frameName):
