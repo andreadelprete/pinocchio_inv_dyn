@@ -352,7 +352,8 @@ class BezierZeroStepCapturability(object):
         else:
             #~ self._qp_solver = qp_solver(dim_pb, self.__Ain.shape[0], solver='qpoases', accuracy=1e-6, maxIter=100, verb=0)
             self._qp_solver.changeInequalityNumber(self.__Ain.shape[0], dim_pb)
-            weight_dist_or = 0.001
+            #weight_dist_or = 0.001
+            weight_dist_or = 0
             D = identity(dim_pb); 
             alpha = sqrt(12./5.) 
             for i in range(3):
@@ -362,7 +363,7 @@ class BezierZeroStepCapturability(object):
             if(l0 != None):
                 # minimizing integral of angular momentum 
                 for i in range(3,6):
-                    D[i,i-3] = alpha
+                    D[i,i] = alpha
                 d[3:]= (9.* l0) / (5. * alpha)
             D = (D[:]); d = (d[:]); A = (self.__Ain[:]);
             lbA = (-100000.* ones(self.__Ain.shape[0]))[:]; ubA=(self.__Aub);
