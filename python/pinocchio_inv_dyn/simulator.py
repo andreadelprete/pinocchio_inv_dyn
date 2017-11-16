@@ -559,8 +559,37 @@ class Simulator (object):
             print "SIMULATOR ERROR Time %.3f "%t, "norm of quaternion is not 1=%f" % norm(self.q[3:7]);
             
         ''' Integrate velocity and acceleration '''
-        self.q  = se3.integrate(self.r.model, self.q, dt*self.v);
+        v_mean = dt*(self.v + 0.5*dt*self.dv);
+        self.q  = se3.integrate(self.r.model, self.q, v_mean);
         self.v += dt*self.dv;
+        
+        if(self.ENABLE_JOINT_LIMITS):
+            ''' check for violations of joint velocity limits '''
+            ind_vel = np.where(np.abs(self.v) > self.DQ_MAX)[0].squeeze();
+            ind_vel = np.array([ind_vel]) if len(ind_vel.shape)==0 else ind_vel;
+            for i in ind_vel:
+                res = res + [VelocityConstraintViolation(self.t, i-7, self.v[i], self.dv[i])];
+                if(self.verb>0):
+                    print "[SIMULATOR] %s" % (res[-1].toString());
+                if(self.ENABLE_JOINT_LIMITS):
+                    self.v[i] = self.DQ_MAX if (self.v[i]>0.0) else -self.DQ_MAX;
+        
+            ''' check for violations of joint position limits '''
+            ind_pos_ub = (self.q[7:]>self.qMax[7:]).A.squeeze();
+            ind_pos_lb = (self.q[7:]<self.qMin[7:]).A.squeeze();
+            for i in np.where(ind_pos_ub)[0]:
+                res = res + [PositionConstraintViolation(self.t, i, self.qMin[7+i,0], self.qMax[7+i,0], self.q[7+i,0], self.v[6+i,0], self.dv[6+i,0])];
+                if(self.verb>0):
+                    print "[SIMULATOR] %s" % (res[-1].toString());
+            for i in np.where(ind_pos_lb)[0]:
+                res = res + [PositionConstraintViolation(self.t, i, self.qMin[7+i,0], self.qMax[7+i,0], self.q[7+i,0], self.v[6+i,0], self.dv[6+i,0])];
+                if(self.verb>0):
+                    print "[SIMULATOR] %s" % (res[-1].toString());
+                
+            self.q[7:][ind_pos_ub] = self.qMax[7:][ind_pos_ub];
+            self.v[6:][ind_pos_ub] = 0.0;
+            self.q[7:][ind_pos_lb] = self.qMin[7:][ind_pos_lb];
+            self.v[6:][ind_pos_lb] = 0.0;
         
         ''' Check for violation of torque limits'''
 #        for i in range(self.n):
@@ -685,33 +714,6 @@ class Simulator (object):
 #                        print "SIMULATOR: normal force leg %d violated, fz=%f" % (i,fz);
 #                    res = res + [ForceConstraintViolation(self.t*self.dt, self.rigidContactConstraints[i].name+' Fz', f[i*6:i*6+6], zeros(6))];
 #                            
-        ''' check for violations of joint limits '''
-        ind_vel = np.where(np.abs(self.v) > self.DQ_MAX)[0].squeeze();
-        ind_vel = np.array([ind_vel]) if len(ind_vel.shape)==0 else ind_vel;
-        for i in ind_vel:
-            res = res + [VelocityConstraintViolation(self.t*self.dt, i-7, self.v[i], self.dv[i])];
-            if(self.verb>0):
-                print "[SIMULATOR] %s" % (res[-1].toString());
-            if(self.ENABLE_JOINT_LIMITS):
-                self.v[i] = self.DQ_MAX if (self.v[i]>0.0) else -self.DQ_MAX;
-        
-        
-        ind_pos_ub = (self.q[7:]>self.qMax[7:]+EPS).A.squeeze();
-        ind_pos_lb = (self.q[7:]<self.qMin[7:]-EPS).A.squeeze();
-        for i in np.where(ind_pos_ub)[0]:
-            res = res + [PositionConstraintViolation(self.t*self.dt, i, self.q[7+i], self.v[6+i], self.dv[6+i])];
-            if(self.verb>0):
-                print "[SIMULATOR] %s" % (res[-1].toString());
-        for i in np.where(ind_pos_lb)[0]:
-            res = res + [PositionConstraintViolation(self.t*self.dt, i, self.q[7+i], self.v[6+i], self.dv[6+i])];
-            if(self.verb>0):
-                print "[SIMULATOR] %s" % (res[-1].toString());
-                
-        if(self.ENABLE_JOINT_LIMITS):
-            self.q[7:][ind_pos_ub] = self.qMax[7:][ind_pos_ub];
-            self.v[6:][ind_pos_ub] = 0.0;
-            self.q[7:][ind_pos_lb] = self.qMin[7:][ind_pos_lb];
-            self.v[6:][ind_pos_lb] = 0.0;
         
         if(updateViewer and self.time_step%int(self.VIEWER_DT/dt)==0):
             self.viewer.updateRobotConfig(self.q);
