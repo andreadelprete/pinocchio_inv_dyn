@@ -44,6 +44,10 @@ class SolverLPCvxopt(solver_LP_abstract.SolverLPAbstract):
             self._n = n;
             self._m_in = m_in;
             self._m_eq = m_eq;
+            
+        if(m_eq==0):
+            A_eq = np.zeros((0,n));
+            b = np.zeros(0);
         
         if(m_in>0):
             self._A_in[:m_in,:]             = A_in;
@@ -98,7 +102,8 @@ class SolverLPCvxopt(solver_LP_abstract.SolverLPAbstract):
                     self._y[m_in+i] = z[2*m_in+i];
                 else:
                     self._y[m_in+i] = z[2*m_in+n+i];
-            self._y[-m_eq:] = np.array(res['y']).reshape(m_eq);       # Lagrange multipliers for equality constraints
+            if(m_eq>0):
+                self._y[-m_eq:] = np.array(res['y']).reshape(m_eq);       # Lagrange multipliers for equality constraints
 #            print "Active constraints: ", self._y[self._y!=0.0].shape
         else:
             if(res['status']=='primal infeasible'):
