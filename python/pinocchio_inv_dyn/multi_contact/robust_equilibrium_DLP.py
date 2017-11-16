@@ -48,14 +48,14 @@ class RobustEquilibriumDLP (object):
     
     INEQ_VIOLATION_THR = 1e-4;
 
-    def __init__ (self, name, contact_points, contact_normals, mu, g, mass, maxIter=100, verb=0, solver='cvxopt'):
+    def __init__ (self, name, contact_points, contact_normals, mu, g, mass, contact_tangents=None, maxIter=100, verb=0, solver='cvxopt'):
         g = np.asarray(g).squeeze();
         self.solver = optim.getNewSolver(solver, name, maxIter=maxIter, verb=verb);
         self.D = np.zeros((6,3));
         self.d = np.zeros(6);
         self.D[3:,:] = -mass*crossMatrix(g);
         self.d[:3]   = mass*g;
-        (G, tmp) = compute_centroidal_cone_generators(contact_points, contact_normals, mu);
+        (G, tmp) = compute_centroidal_cone_generators(contact_points, contact_normals, mu, contact_tangents);
         
         self.name = name;
         self.maxIter    = maxIter;
