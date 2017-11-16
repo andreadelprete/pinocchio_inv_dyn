@@ -40,7 +40,7 @@ def areStatesViable(q, dq, qMin, qMax, dqMax, ddqMax, verbose=False):
 
 ''' Compute acceleration limits imposed by position bounds.
 '''
-def computeAccLimitsFromPosLimits(q, dq, qMin, qMax, ddqMax, dt, verbose=True):
+def computeAccLimitsFromPosLimits(q, dq, qMin, qMax, dt, verbose=True):
     two_dt_sq   = 2.0/(dt**2);
     ddqMax_q3 = two_dt_sq*(qMax-q-dt*dq);
     ddqMin_q3 = two_dt_sq*(qMin-q-dt*dq);
@@ -49,16 +49,19 @@ def computeAccLimitsFromPosLimits(q, dq, qMin, qMax, ddqMax, dt, verbose=True):
     ddqUB = np.matlib.zeros((n,1));
     ddqLB = np.matlib.zeros((n,1));
     
-    ind  = (dq<=0.0).A.squeeze();
-    ind2 = np.logical_and(ind, (ddqMin_q3<minus_dq_over_dt).A.squeeze());
-    ind3 = np.logical_and(ind, np.logical_and(np.logical_not(ind2), (q!=qMin).A.squeeze()));
+    ind  = (dq<=0.0).A1;
+    ind2 = np.logical_and(ind, (ddqMin_q3<minus_dq_over_dt).A1);
+    ind3 = np.logical_and(ind, np.logical_and(np.logical_not(ind2), (q!=qMin).A1));
     ind4 = np.logical_and(ind, np.logical_and(np.logical_not(ind2), np.logical_not(ind3)));
     ddqUB[ind]  = ddqMax_q3[ind];
     ddqLB[ind2]  = ddqMin_q3[ind2];
     if(np.sum(ind3)>0):
         ddqMin_q2 = np.divide(np.square(dq[ind3]), 2.0*(q[ind3]-qMin[ind3]));
         ddqLB[ind3] = np.maximum(ddqMin_q2, minus_dq_over_dt[ind3]);
-    ddqLB[ind4] = ddqMax[ind4];
+    ddqLB[ind4] = 0.0; #ddqMax
+    
+#    if(np.count_nonzero(ind4)>0):
+#        print "ind4 for LB:", np.where(ind4)[0], "q-qMin", 1e6*(q[ind4]-qMin[ind4]), "dq", 1e6*dq[ind4], "dq=0?", np.abs(dq[ind4])<EPS
     
     nind = np.logical_not(ind);
     ind2 = np.logical_and(nind, (ddqMax_q3>minus_dq_over_dt).A.squeeze());
@@ -69,7 +72,10 @@ def computeAccLimitsFromPosLimits(q, dq, qMin, qMax, ddqMax, dt, verbose=True):
     if(np.sum(ind3)>0):
         ddqMax_q2 = np.divide(-np.square(dq[ind3]), 2.0*(qMax[ind3]-q[ind3]));
         ddqUB[ind3] = np.minimum(ddqMax_q2, minus_dq_over_dt[ind3]);
-    ddqUB[ind4] = -ddqMax[ind4];
+    ddqUB[ind4] = 0.0; #-ddqMax[ind4];
+    
+#    if(np.count_nonzero(ind4)>0):
+#        print "ind4 for UB:", np.where(ind4)[0], "qMax-q", 1e3*(qMax[ind4]-q[ind4]), "dq", 1e3*dq[ind4], "dq=0?", np.abs(dq[ind4])<EPS
     
 #    # The following code is a slower (but more readable) version of the code above
 #    for i in range(n):
@@ -155,8 +161,8 @@ def computeAccLimits(q, dq, qMin, qMax, dqMax, ddqMax, dt, verbose=True, ddqStop
                      IMPOSE_VELOCITY_BOUNDS=True, IMPOSE_VIABILITY_BOUNDS=True, IMPOSE_ACCELERATION_BOUNDS=True):    
     if(verbose):
         viabViol = areStatesViable(q, dq, qMin, qMax, dqMax, ddqMax, verbose);
-#    if(np.sum(viabViol)>0 and verbose):
-#        print "WARNING: some states are not viable:", np.where(viabViol)[0];
+        if(np.sum(viabViol)>0):
+            print "WARNING: some states are not viable:", np.where(viabViol)[0];
         
     if(ddqStop is None):
         ddqStop=ddqMax;
@@ -167,7 +173,15 @@ def computeAccLimits(q, dq, qMin, qMax, dqMax, ddqMax, dt, verbose=True, ddqStop
     
     # Acceleration limits imposed by position bounds
     if(IMPOSE_POSITION_BOUNDS):
-        (ddqLB[:,0], ddqUB[:,0]) = computeAccLimitsFromPosLimits(q, dq, qMin, qMax, ddqMax, dt, verbose);
+        (ddqLB[:,0], ddqUB[:,0]) = computeAccLimitsFromPosLimits(q, dq, qMin, qMax, dt, verbose);
+    else:
+        # even if position bounds are disabled, constrain acc of joints at pos bounds
+        ind_pos_ub = np.logical_and(q>=qMax-EPS, dq==0.0).A.squeeze();
+        ind_pos_lb = np.logical_and(q<=qMin+EPS, dq==0.0).A.squeeze();
+        ddqLB[ind_pos_lb,0] = 0.0;
+        ddqUB[ind_pos_ub,0] = 0.0;
+#        if(np.count_nonzero(ind_pos_ub)+np.count_nonzero(ind_pos_lb) > 0):
+#            print "Joints at their bounds: ", np.where(ind_pos_lb)[0], np.where(ind_pos_ub)[0]
     
     # Acceleration limits imposed by velocity bounds
     # dq[t+1] = dq + dt*ddq < dqMax
