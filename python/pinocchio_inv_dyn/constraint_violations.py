@@ -5,6 +5,7 @@ Created on Mon Oct 26 10:20:09 2015
 @author: adelpret
 """
 import numpy as np
+from numpy import pi
 from sot_utils import hrp2_jointId_2_name, TAU_MAX
 
 def enum(**enums):
@@ -79,22 +80,31 @@ class PositionConstraintViolation(ConstraintViolation):
     ddq = 0;
     ddq_d = None;
     
-    def __init__(self, time, jointId, q, dq, ddq, ddq_d=None):
+    def __init__(self, time, jointId, qMin, qMax, q, dq, ddq, ddq_d=None):
         self.time = time;
         self.jointId = jointId;
+        self.qMin = qMin;
+        self.qMax = qMax;
         self.q = q;
         self.dq = dq;
         self.ddq = ddq;
         self.ddq_d = ddq_d;
         
     def toString(self):
-        s = 'Time %.3f POS VIOLATION '%(self.time);
-        s += "joint %d, dq=%.1f, ddq=%.1f " % (self.jointId, self.dq, self.ddq);
+        s = 'Time %.3f POS '%(self.time);
+        if(self.q>self.qMax):
+            s += "UPPER BOUND VIOLATION ";
+            qErr = self.q - self.qMax;
+        else:
+            s += "LOWER BOUND VIOLATION ";
+            qErr = self.qMin - self.q;
+        s += "joint %d, qErr=%.1f, dq=%.1f, ddq=%.1f [deg]" % (self.jointId, 180*qErr/pi, 180*self.dq/pi, 180*self.ddq/pi);
         if(self.ddq_d!=None):
             s += "ddq_d=%.1f "%self.ddq_d;
         if(self.dq_ctrl!=None):
             s += "dq_ctrl=%.1f "%self.dq_ctrl;
         return s;
+
         
 class VelocityConstraintViolation(ConstraintViolation):
     violationType = ConstraintViolationType.velocity;
