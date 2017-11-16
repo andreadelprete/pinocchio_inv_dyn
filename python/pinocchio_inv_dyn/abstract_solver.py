@@ -187,14 +187,12 @@ class AbstractSolver (object):
                     self.initialized = True;
             else:
                 imode = self.qpOasesSolver.hotstart(Hess, grad, self.A, self.lb, self.ub, self.lbA, self.ubA, maxActiveSetIter, maxComputationTime);
-                if(imode==PyReturnValue.HOTSTART_FAILED_AS_QP_NOT_INITIALISED):
+                if(imode!=0): #==PyReturnValue.HOTSTART_FAILED_AS_QP_NOT_INITIALISED):
                     maxActiveSetIter    = np.array([maxIter]);
                     maxComputationTime  = np.array(maxTime);
                     imode = self.qpOasesSolver.init(Hess, grad, self.A, self.lb, self.ub, self.lbA, self.ubA, maxActiveSetIter, maxComputationTime);
-                    if(imode==0):
-                        self.initialized = True;
-                if(imode!=0):
-                    self.initialized = False;
+                    if(imode!=0):
+                        self.initialized = False;
 
             self.qpTime += maxComputationTime;
             self.iter               = 1+maxActiveSetIter[0];
