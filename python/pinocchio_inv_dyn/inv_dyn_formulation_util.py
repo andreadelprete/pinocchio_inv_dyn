@@ -124,34 +124,37 @@ class InvDynFormulation (object):
     contact_normals = None; # 3xN matrix containing the contact normals in world frame
 
     
-    def updateInequalityData(self, updateConstrainedDynamics=True):
+    def updateInequalityData(self, updateConstrainedDynamics=True, doNotUpdateForceLimits=False):
         self.updateSupportPolygon();
         
         self.m_in = 0;                              # number of inequalities
         c = len(self.rigidContactConstraints);      # number of unilateral contacts
         self.k = int(np.sum([con.dim for con in self.rigidContactConstraints]));
         self.k += int(np.sum([con.dim for con in self.bilateralContactConstraints]));
-        if(self.ENABLE_FORCE_LIMITS):
-            self.rigidContactConstraints_m_in = np.zeros(c, np.int);
-            Bf = zeros((0,self.k));
-            bf = zeros(0);
-            ii = 0;
-            for i in range(c):
-                (Bfi, bfi) = self.createContactForceInequalities(self.rigidContactConstraints_fMin[i], self.rigidContactConstraints_mu[i], \
-                                                                 self.rigidContactConstraints_p[i], self.rigidContactConstraints_N[i], \
-                                                                 self.rigidContactConstraints[i].framePosition().rotation);
-                self.rigidContactConstraints_m_in[i] = Bfi.shape[0];
-                tmp = zeros((Bfi.shape[0], self.k));
-                dim = self.rigidContactConstraints[i].dim;
-                mask = self.rigidContactConstraints[i]._mask;
-                tmp[:,ii:ii+dim] = Bfi[:,mask];
-                ii += dim;
-                Bf = np.vstack((Bf, tmp));
-                bf = np.vstack((bf, bfi));
-            self.ind_force_in = range(self.m_in, self.m_in + np.sum(self.rigidContactConstraints_m_in));
+        if(doNotUpdateForceLimits==False):
+            if(self.ENABLE_FORCE_LIMITS):
+                self.rigidContactConstraints_m_in = np.zeros(c, np.int);
+                Bf = zeros((0,self.k));
+                bf = zeros(0);
+                ii = 0;
+                for i in range(c):
+                    (Bfi, bfi) = self.createContactForceInequalities(self.rigidContactConstraints_fMin[i], self.rigidContactConstraints_mu[i], \
+                                                                     self.rigidContactConstraints_p[i], self.rigidContactConstraints_N[i], \
+                                                                     self.rigidContactConstraints[i].framePosition().rotation);
+                    self.rigidContactConstraints_m_in[i] = Bfi.shape[0];
+                    tmp = zeros((Bfi.shape[0], self.k));
+                    dim = self.rigidContactConstraints[i].dim;
+                    mask = self.rigidContactConstraints[i]._mask;
+                    tmp[:,ii:ii+dim] = Bfi[:,mask];
+                    ii += dim;
+                    Bf = np.vstack((Bf, tmp));
+                    bf = np.vstack((bf, bfi));
+                self.ind_force_in = range(self.m_in, self.m_in + np.sum(self.rigidContactConstraints_m_in));
+                self.m_in += np.sum(self.rigidContactConstraints_m_in);
+            else:
+                self.ind_force_in = [];
+        elif(self.ENABLE_FORCE_LIMITS):
             self.m_in += np.sum(self.rigidContactConstraints_m_in);
-        else:
-            self.ind_force_in = [];
 
         if(self.ENABLE_JOINT_LIMITS):
             self.ind_acc_in = range(self.m_in, self.m_in+2*self.na);
@@ -171,24 +174,32 @@ class InvDynFormulation (object):
             self.m_in += self.b_sp.size;
         else:
             self.ind_cp_in = [];
-            
-        # resize all data that depends on k
-        self.B          = zeros((self.m_in, self.nv+self.k+self.na));
-        self.b          = zeros(self.m_in);
-        self.Jc         = zeros((self.k,self.nv));
-        self.dJc_v      = zeros(self.k);
-        self.dx_c       = zeros(self.k);
-        self.ddx_c_des  = zeros(self.k);
-        self.Jc_Minv    = zeros((self.k,self.nv));
-        self.Lambda_c   = zeros((self.k,self.k));
-        self.Jc_T_pinv  = zeros((self.k,self.nv));
-        self.C           = zeros((self.nv+self.k+self.na, self.na));
-        self.c           = zeros(self.nv+self.k+self.na);
         
-        if(self.ENABLE_FORCE_LIMITS and self.k>0):
-            self.B[self.ind_force_in, self.nv:self.nv+self.k] = Bf;
-            self.b[self.ind_force_in] = bf;
-            #print "Contact inequality constraints:\n", self.B[self.ind_force_in, self.nv:self.nv+self.k], "\n", bf.T;
+        if(doNotUpdateForceLimits):
+            B_old = np.copy(self.B);
+            b_old = np.copy(self.b);
+            self.B          = zeros((self.m_in, self.nv+self.k+self.na));
+            self.b          = zeros(self.m_in);
+            self.B[self.ind_force_in, self.nv:self.nv+self.k] = B_old[self.ind_force_in, self.nv:self.nv+self.k];
+            self.b[self.ind_force_in] = b_old[self.ind_force_in];
+        else:
+            # resize all data that depends on k
+            self.B          = zeros((self.m_in, self.nv+self.k+self.na));
+            self.b          = zeros(self.m_in);
+            self.Jc         = zeros((self.k,self.nv));
+            self.dJc_v      = zeros(self.k);
+            self.dx_c       = zeros(self.k);
+            self.ddx_c_des  = zeros(self.k);
+            self.Jc_Minv    = zeros((self.k,self.nv));
+            self.Lambda_c   = zeros((self.k,self.k));
+            self.Jc_T_pinv  = zeros((self.k,self.nv));
+            self.C           = zeros((self.nv+self.k+self.na, self.na));
+            self.c           = zeros(self.nv+self.k+self.na);
+        
+            if(self.ENABLE_FORCE_LIMITS and self.k>0):
+                self.B[self.ind_force_in, self.nv:self.nv+self.k] = np.copy(Bf);
+                self.b[self.ind_force_in] = np.copy(bf);
+#               print c, "contact inequality constraints:\n", self.B[self.ind_force_in, self.nv:self.nv+self.k], "\n", bf.T;
         
         if(updateConstrainedDynamics):
             self.updateConstrainedDynamics();
@@ -366,16 +377,20 @@ class InvDynFormulation (object):
     ''' ********** ENABLE OR DISABLE INEQUALITY CONSTRAINTS ********** '''
     def enableJointLimits(self, enable=True, IMPOSE_POSITION_BOUNDS=True, IMPOSE_VELOCITY_BOUNDS=True, 
                           IMPOSE_VIABILITY_BOUNDS=True, IMPOSE_ACCELERATION_BOUNDS=True):
-        self.ENABLE_JOINT_LIMITS = enable;
+        update = False;
+        if(enable != self.ENABLE_JOINT_LIMITS):
+            update = True;
+            self.ENABLE_JOINT_LIMITS = enable;
         self.IMPOSE_POSITION_BOUNDS = IMPOSE_POSITION_BOUNDS;
         self.IMPOSE_VELOCITY_BOUNDS = IMPOSE_VELOCITY_BOUNDS;
         self.IMPOSE_VIABILITY_BOUNDS = IMPOSE_VIABILITY_BOUNDS;
         self.IMPOSE_ACCELERATION_BOUNDS = IMPOSE_ACCELERATION_BOUNDS;
-        self.updateInequalityData();
+        if(update):
+            self.updateInequalityData(doNotUpdateForceLimits=True);
         
     def enableTorqueLimits(self, enable=True):
         self.ENABLE_TORQUE_LIMITS = enable;
-        self.updateInequalityData();
+        self.updateInequalityData(doNotUpdateForceLimits=True);
         
     def enableForceLimits(self, enable=True):
         self.ENABLE_FORCE_LIMITS = enable;
@@ -383,7 +398,7 @@ class InvDynFormulation (object):
         
     def enableCapturePointLimits(self, enable=True):
         self.ENABLE_CAPTURE_POINT_LIMITS = enable;
-        self.updateInequalityData();
+        self.updateInequalityData(doNotUpdateForceLimits=True);
     
     ''' ********** SET ROBOT STATE ********** '''
     def setPositions(self, q, updateConstraintReference=True):
@@ -622,6 +637,8 @@ class InvDynFormulation (object):
             (B_cp, b_cp) = self.createCapturePointInequalities();
             self.B[self.ind_cp_in, :n+6]        = B_cp;
             self.b[self.ind_cp_in]              = b_cp;
+        
+#        print "[createInequalityConstraints] Contact inequality constraints:\n", self.B[self.ind_force_in, self.nv:self.nv+self.k]
         
         self.G       = np.dot(self.B, self.C);
         self.glb     = self.b + np.dot(self.B, self.c);
