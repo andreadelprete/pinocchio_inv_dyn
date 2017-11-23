@@ -77,6 +77,7 @@ def setAxisFontSize(ax, size):
 mpl.rcdefaults()
 mpl.rcParams['lines.linewidth']     = DEFAULT_LINE_WIDTH;
 mpl.rcParams['lines.markersize']    = DEFAULT_MARKER_SIZE;
+mpl.rcParams['patch.linewidth']     = 1;
 mpl.rcParams['font.family']         = DEFAULT_FONT_FAMILY;
 mpl.rcParams['font.size']           = DEFAULT_FONT_SIZE;
 mpl.rcParams['font.serif']          = DEFAULT_FONT_SERIF;
