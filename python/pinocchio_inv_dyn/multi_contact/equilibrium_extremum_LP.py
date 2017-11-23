@@ -80,6 +80,7 @@ class EquilibriumExtremumLP (object):
 
         (status, self.x, self.y) = self.solver.solve(self.grad, self.lb, self.ub, A_eq=self.constrMat, b=self.constrB);
         self.computationTime     = time.time()-start;
+        self.lpTime = self.solver._lpTime;
         
         return (status, self.a0 + self.a*self.x[0]);
 
@@ -98,11 +99,13 @@ class EquilibriumExtremumLP (object):
         distance = 1e100;
         outside = False;
         status_final = optim.LP_status.INFEASIBLE;
+        self.lpTime = 0.0;
         for i in range(n_directions):
             a[0] = np.cos(theta);
             a[1] = np.sin(theta);
             self.constrMat[:,0] = -np.dot(self.D, a);
             (status, self.x, self.y) = self.solver.solve(self.grad, self.lb, self.ub, A_eq=self.constrMat, b=self.constrB);
+            self.lpTime += self.solver._lpTime;
             if(status==optim.LP_status.OPTIMAL):
                 status_final = status
                 if(self.verb>1):
