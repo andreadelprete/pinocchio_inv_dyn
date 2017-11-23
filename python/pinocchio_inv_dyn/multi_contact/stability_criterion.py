@@ -367,7 +367,7 @@ class StabilityCriterion(object):
         last_iteration = False;
         self._computationTime = 0.0;
         self._outerIterations = 0;
-        self._innerIterations = 0;
+#        self._innerIterations = 0;
         
         if(Dalpha==0.0):
             r = self._equilibrium_solver.compute_equilibrium_robustness(self._c0);
