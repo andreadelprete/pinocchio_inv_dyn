@@ -234,7 +234,7 @@ class CoMTaskWithAccelerationScaling(Task):
     D[:,0] = a_des / norm(a_des);
     # compute 2 directions orthogonal to D[0,:] and orthogonal to each other
     D[:,1] = mat_cross(D[:,0], np.matrix([0.0, 0.0, 1.0]).T);
-    if(norm(D[1,:])<EPS):
+    if(norm(D[:,1])<EPS):
       D[:,1] = mat_cross(D[:,0], np.matrix([0.0, 1.0, 0.0]).T);
     D[:,1] *= self.weight/norm(D[:,1]);
     D[:,2] = mat_cross(D[:,0], D[:,1]);
@@ -246,6 +246,46 @@ class CoMTaskWithAccelerationScaling(Task):
 
     return J[self._mask,:], drift[self._mask], a_des[self._mask]
 
+
+''' Task to maintain a straight CoM path.
+'''
+class CoMStraightPathTask(Task):
+
+  def __init__ (self, robot, name = "CoM Straight Path Task"):
+    Task.__init__ (self, robot, name)
+    # mask over the desired euclidian axis
+    self._mask = (np.ones(2)).astype(bool)
+
+  @property
+  def dim(self):
+    return self._mask.sum()
+
+  def mask(self, mask):
+    assert len(mask) == 2, "The mask must have 2 elements"
+    self._mask = mask.astype(bool)
+    
+  def dyn_value(self, t, q, v, update_geometry = False):
+    # Get the current CoM position, velocity and acceleration
+    p_com, v_com, drift = self.robot.com(q,v,0*v)
+    a_des = mat_zeros(2);
+    # Compute jacobian
+    J = self.robot.Jcom(q)
+
+    # compute 2 directions orthogonal to v_com and orthogonal to each other
+    D = mat_zeros((3,2));
+    d = v_com / norm(v_com);
+    D[:,0] = mat_cross(d, np.matrix([0.0, 0.0, 1.0]).T);
+    if(norm(D[:,0])<EPS):
+      D[:,0] = mat_cross(d, np.matrix([0.0, 1.0, 0.0]).T);
+    D[:,0] /= norm(D[:,0]);
+    D[:,1] = mat_cross(d, D[:,0]);
+    D[:,1] /= norm(D[:,1]);
+
+    J     = D.T*J;
+    drift = D.T*drift;
+
+    return J[self._mask,:], drift[self._mask], a_des[self._mask]
+    
 
 ''' Define Postural Task considering only the joints (and not the floating base). '''
 class JointPostureTask(Task):
@@ -357,6 +397,7 @@ class AngularMomentumTask(Task):
     self._ref_traj = refTraj;
     # mask over the desired euclidian axis
     self._mask = (np.ones(3)).astype(bool);
+    self._data = robot.model.createData();
 
   @property
   def dim(self):
@@ -370,32 +411,35 @@ class AngularMomentumTask(Task):
     self._ref_traj = traj
   
   def dyn_value(self, t, q, v, update_geometry=False):
-    g = self.robot.bias(q,0*v)
-    b = self.robot.bias(q,v)
-    b -= g;
-    M = self.robot.mass(q)
-
-    com_p = self.robot.com(q)
-    cXi = SE3.Identity()
-    oXi = self.robot.data.oMi[1]
-    cXi.rotation = oXi.rotation
-    cXi.translation = oXi.translation - com_p
-    b_com = cXi.actInv(se3.Force(b[:6,0]))
-#    b_com = cXi.actInv(b[:6,0]).vector
-    b_com = b_com.angular;
-
-#    M_com = cXi.inverse().action.T * M[:6,:]
-#    M_com = cXi.inverse().np.T * M[:6,:]
-    M_com = self.robot.momentumJacobian(q, v, update_geometry);
-    M_com = M_com[3:,:]
-    L = M_com * v
+    J_am = self.robot.momentumJacobian(q, v, update_geometry);
+    J_am = J_am[3:,:]
+    L = J_am * v
 
     L_ref, dL_ref, ddL_ref = self._ref_traj(t)
-#    acc = dL_ref - b_com[3:,:]
     dL_des = dL_ref - self.kp * (L - L_ref)
+      
+    # Justin's code to compute drift (does not work)
+    #g = self.robot.bias(q,0*v)
+    #b = self.robot.bias(q,v)
+    #b -= g;
+    #com_p = self.robot.com(q)
+    #cXi = SE3.Identity()
+    #oXi = self.robot.data.oMi[1]
+    #cXi.rotation = oXi.rotation
+    #cXi.translation = oXi.translation - com_p
+    #b_com = cXi.actInv(se3.Force(b[:6,0]))
+    #b_com = b_com.angular;
     
-    return M_com[self._mask,:], b_com[self._mask,:], dL_des[self._mask,0]
-#    return self._coeff * L_error[self._mask], 0., self._coeff * acc[self._mask,0]
+    # Del Prete's quick and dirty way to compute drift
+    #b_com[:] = 0.0;
+    # compute momentum Jacobian at next time step assuming zero acc
+    dt = 1e-3;
+    q_next = se3.integrate(self.robot.model, q, dt*v);
+    se3.ccrba(self.robot.model, self._data, q_next, v);
+    J_am_next =  self._data.Ag[3:,:];
+    b_com = (J_am_next - J_am)*v/dt;
+    
+    return J_am[self._mask,:], b_com[self._mask,:], dL_des[self._mask,0]
 
 
 class ConfigTask(Task):
