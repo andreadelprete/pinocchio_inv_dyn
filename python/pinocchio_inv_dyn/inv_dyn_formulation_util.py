@@ -174,6 +174,13 @@ class InvDynFormulation (object):
             self.m_in += self.b_sp.size;
         else:
             self.ind_cp_in = [];
+            
+        (A,a) = self.computeConstraintTasks(0.0);
+        if(A.shape[0]>0):
+            self.ind_task_constr = range(self.m_in, self.m_in+A.shape[0]);
+            self.m_in += A.shape[0];
+        else:
+            self.ind_task_constr = [];
         
         if(doNotUpdateForceLimits):
             B_old = np.copy(self.B);
@@ -293,19 +300,28 @@ class InvDynFormulation (object):
     def addTask(self, task, weight):
         self.tasks        += [task];
         self.task_weights += [weight];
+        if(weight<0.0):
+            self.updateInequalityData(doNotUpdateForceLimits=True);
         
     def removeTask(self, task_name):
         for (i,t) in enumerate(self.tasks):
             if t.name==task_name:
+                w = self.task_weights[i];
                 del self.tasks[i];
                 del self.task_weights[i];
+                if(w<0.0):
+                    self.updateInequalityData(doNotUpdateForceLimits=True);
                 return True;
         raise ValueError("[InvDynForm] ERROR: task %s cannot be removed because it does not exist!" % task_name);
 
     def setTaskWeight(self, task_name, weight):
         for (i,t) in enumerate(self.tasks):
             if t.name==task_name:
-                self.task_weights[i] = weight;
+                if(weight<0.0 or self.task_weights[i]<0.0):
+                    self.task_weights[i] = weight;
+                    self.updateInequalityData(doNotUpdateForceLimits=True);
+                else:
+                    self.task_weights[i] = weight;
                 return True;
         raise ValueError("[InvDynForm] ERROR: task %s does not exist!" % task_name);
         
@@ -491,26 +507,64 @@ class InvDynFormulation (object):
 
         
     def computeCostFunction(self, t):
-        n_tasks = len(self.tasks);
+        #n_tasks = len(self.tasks);
+        n_tasks = np.count_nonzero(np.array(self.task_weights)>=0.0);
         dims    = np.empty(n_tasks, np.int);
         J       = n_tasks*[None,];
         drift   = n_tasks*[None,];
         a_des   = n_tasks*[None,];
         dim = 0;
+        i = 0;
         for k in range(n_tasks):
-            J[k], drift[k], a_des[k] = self.tasks[k].dyn_value(t, self.q, self.v);
-            dims[k] = a_des[k].shape[0];
-            dim += dims[k];
+            if(self.task_weights[k]>=0.0):
+                J[i], drift[i], a_des[i] = self.tasks[k].dyn_value(t, self.q, self.v);
+                dims[i] = a_des[i].shape[0];
+                dim += dims[i];
+                i += 1;
+                    
         A = zeros((dim, self.nv+self.k+self.na));
         a = zeros(dim);
         i = 0;
+        j = 0;
         for k in range(n_tasks):
-            A[i:i+dims[k],:self.nv] = self.task_weights[k]*J[k];
-            a[i:i+dims[k]]          = self.task_weights[k]*(a_des[k] - drift[k]);
-            i += dims[k];
+            if(self.task_weights[k]>=0.0):
+                A[j:j+dims[i],:self.nv] = self.task_weights[k]*J[i];
+                a[j:j+dims[i]]          = self.task_weights[k]*(a_des[i] - drift[i]);
+                j += dims[i];
+                i += 1;
         D       = np.dot(A,self.C);
         d       = a - np.dot(A,self.c);
         return (D,d);
+        
+    def computeConstraintTasks(self, t):
+        n_tasks = np.count_nonzero(np.array(self.task_weights)<0.0);
+        if(n_tasks==0):
+            return (zeros((0,self.nv+self.k+self.na)), zeros(0));
+        dims    = np.empty(n_tasks, np.int);
+        J       = n_tasks*[None,];
+        drift   = n_tasks*[None,];
+        a_des   = n_tasks*[None,];
+        dim = 0;
+        i = 0;
+        for k in range(len(self.tasks)):
+            if(self.task_weights[k]<0.0):
+                J[i], drift[i], a_des[i] = self.tasks[k].dyn_value(t, self.q, self.v);
+                dims[i] = a_des[i].shape[0];
+                dim += dims[i];
+                i += 1;
+        A = zeros((dim, self.nv+self.k+self.na));
+        a = zeros(dim);
+        i = 0;
+        j = 0;
+        for k in range(len(self.tasks)):
+            if(self.task_weights[k]<0.0):
+                A[j:j+dims[i],:self.nv] = self.task_weights[k]*J[i];
+                a[j:j+dims[i]]          = self.task_weights[k]*(a_des[i] - drift[i]);
+                j += dims[i];
+                i += 1;
+        #D       = np.dot(A,self.C);
+        #d       = a - np.dot(A,self.c);
+        return (A,a);
     
     
     ''' ********** GET ROBOT STATE ********** '''        
@@ -625,7 +679,7 @@ class InvDynFormulation (object):
         Before calling this method you should call setNewSensorData to set the current state of 
         the robot.
     '''
-    def createInequalityConstraints(self):
+    def createInequalityConstraints(self, t=0.0):
         n = self.na;
 
         if(self.ENABLE_JOINT_LIMITS):
@@ -637,13 +691,18 @@ class InvDynFormulation (object):
             (B_cp, b_cp) = self.createCapturePointInequalities();
             self.B[self.ind_cp_in, :n+6]        = B_cp;
             self.b[self.ind_cp_in]              = b_cp;
-        
-#        print "[createInequalityConstraints] Contact inequality constraints:\n", self.B[self.ind_force_in, self.nv:self.nv+self.k]
-        
+            
+        (A,a) = self.computeConstraintTasks(t);
+        # A*y = a, y = C*tau+c => A*C*tau = a - A*c
+        self.B[self.ind_task_constr, :] = A;
+        self.b[self.ind_task_constr]    = -a;
+                
         self.G       = np.dot(self.B, self.C);
-        self.glb     = self.b + np.dot(self.B, self.c);
+        self.glb     = -self.b - np.dot(self.B, self.c);
         self.gub     = 1e10*np.matlib.ones((self.m_in,1))
-        return (self.G, -self.glb, self.gub, self.lb, self.ub);
+        self.gub[self.ind_task_constr] = self.glb[self.ind_task_constr];
+        
+        return (self.G, self.glb, self.gub, self.lb, self.ub);
     
         
     def createForceRegularizationTask(self, w_f):
