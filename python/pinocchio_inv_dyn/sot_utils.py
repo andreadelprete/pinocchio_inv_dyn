@@ -11,12 +11,13 @@ from math import sqrt, atan2, pi
 from pinocchio.rpy import rotate
 from pinocchio import Quaternion
 from pinocchio.utils import matrixToRpy, rpyToMatrix
-from polytope_conversion_utils import *
-from qpoases import PyQProblemB as QProblemB # QP with simple bounds only
-from qpoases import PySQProblem as SQProblem
-from qpoases import PyOptions as Options
-from qpoases import PyPrintLevel as PrintLevel
-from qpoases import PyReturnValue
+from numpy import array 
+#~ from polytope_conversion_utils import *
+#~ from qpoases import PyQProblemB as QProblemB # QP with simple bounds only
+#~ from qpoases import PySQProblem as SQProblem
+#~ from qpoases import PyOptions as Options
+#~ from qpoases import PyPrintLevel as PrintLevel
+#~ from qpoases import PyReturnValue
 
 EPS = 1e-6
 
@@ -191,6 +192,7 @@ def compute6dContactInequalities(contact_points, contact_normals, mu):
     ''' compute generators '''
     G_centr4 = compute6dContactMap(contact_points, contact_normals, mu);
     ''' convert generators to inequalities '''
+    from polytope_conversion_utils import *
     H = cone_span_to_face(G_centr4);
     return H;
     
@@ -224,6 +226,7 @@ def computeRectangularContactInequalities(lxp, lxn, lyp, lyn, mu):
         G_centr4[:3,cg*i:cg*i+cg] = G4;
         G_centr4[3:,cg*i:cg*i+cg] = np.dot(crossMatrix(p[i,:]), G4);
     ''' convert generators to inequalities '''
+    from polytope_conversion_utils import *
     H = cone_span_to_face(G_centr4);
     return H;
     
@@ -275,6 +278,11 @@ def solveHierarchicalLeastSquares(A_list, b_list, damping=1e-4, zero_thr=1e-5):
     return x;
 
 def qpOasesSolverMsg(imode):
+    from qpoases import PyQProblemB as QProblemB # QP with simple bounds only
+    from qpoases import PySQProblem as SQProblem
+    from qpoases import PyOptions as Options
+    from qpoases import PyPrintLevel as PrintLevel
+    from qpoases import PyReturnValue
     if(imode==PyReturnValue.HOTSTART_STOPPED_INFEASIBILITY):
         return "HOTSTART_STOPPED_INFEASIBILITY";
     elif(imode==PyReturnValue.MAX_NWSR_REACHED):
