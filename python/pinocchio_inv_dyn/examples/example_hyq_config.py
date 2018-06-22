@@ -23,7 +23,7 @@ q0                          = np.matrix([[0.0 ,  0.0,  0.63,  0.  , -0.  ,  0.  
 ENABLE_CAPTURE_POINT_LIMITS     = False;
 ENABLE_TORQUE_LIMITS            = True;
 ENABLE_FORCE_LIMITS             = True;
-ENABLE_JOINT_LIMITS             = True;
+ENABLE_JOINT_LIMITS             = 0;
 IMPOSE_POSITION_BOUNDS          = True;
 IMPOSE_VELOCITY_BOUNDS          = True;
 IMPOSE_VIABILITY_BOUNDS         = True;
@@ -70,7 +70,7 @@ MAX_COM_VELOCITY            = 5;
 MAX_CONSTRAINT_ERROR        = 0.1;
 
 ''' VIEWER PARAMETERS '''
-ENABLE_VIEWER               = True;
+ENABLE_VIEWER               = False;
 PLAY_MOTION_WHILE_COMPUTING = True;
 PLAY_MOTION_AT_THE_END      = False;
 DT_VIEWER                   = 10*dt;   # timestep used to display motion with viewer

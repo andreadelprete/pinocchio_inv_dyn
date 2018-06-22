@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 
-DEFAULT_FONT_SIZE = 40;
+DEFAULT_FONT_SIZE = 20;
 DEFAULT_AXIS_FONT_SIZE = DEFAULT_FONT_SIZE;
-DEFAULT_LINE_WIDTH = 8; #13;
+DEFAULT_LINE_WIDTH = 4; #13;
 DEFAULT_MARKER_SIZE = 6;
 DEFAULT_FONT_FAMILY = 'sans-serif'
 DEFAULT_FONT_SIZE = DEFAULT_FONT_SIZE;
@@ -51,7 +51,7 @@ BOUNDS_COLOR = 'silver';
 def create_empty_figure(nRows=1, nCols=1, spinesPos=None,sharex=True):
     f, ax = plt.subplots(nRows,nCols,sharex=sharex);
     mngr = plt.get_current_fig_manager()
-    mngr.window.setGeometry(50,50,1080,720);
+#    mngr.window.setGeometry(50,50,1080,720);
 
     if(spinesPos!=None):
         if(nRows*nCols>1):

@@ -3,9 +3,9 @@ from numpy import zeros, sqrt, array, vstack
 import numpy as np
 #from math import cos, sin, tan, atan, pi
 import matplotlib.pyplot as plt
-import cdd
+#import cdd
 import plot_utils as plut
-from polytope_conversion_utils import poly_face_to_span, NotPolyFace
+#from polytope_conversion_utils import poly_face_to_span, NotPolyFace
 
 NUMBER_TYPE = 'float'  # 'float' or 'fraction'
 
@@ -129,6 +129,7 @@ def plot_polytope(A, b, V=None, color='b', ax=None, plotLines=True, lw=4):
     
     if(V==None):
         try:
+            from polytope_conversion_utils import poly_face_to_span, NotPolyFace
             V = poly_face_to_span(A,b).T;
         except (ValueError,NotPolyFace) as e:
             print "WARNING: "+str(e);
@@ -175,6 +176,7 @@ def compute_convex_hull(S):
     Returns the matrix A and the vector b such that:
         {x = S z, sum z = 1, z>=0} if and only if {A x + b >= 0}.
     """
+    import cdd
     V = np.hstack([np.ones((S.shape[1], 1)), S.T])
     # V-representation: first column is 0 for rays, 1 for vertices
     V_cdd = cdd.Matrix(V, number_type=NUMBER_TYPE)

@@ -1,16 +1,16 @@
 import numpy as np
 from numpy.linalg import norm
 from numpy.random import random
-from polytope_conversion_utils import cone_span_to_face
+#from polytope_conversion_utils import cone_span_to_face
 from pinocchio_inv_dyn.robot_wrapper import RobotWrapper
 import pinocchio as se3
 from pinocchio.utils import zero as zeros
 from acc_bounds_util_multi_dof import computeAccLimits
 from sot_utils import compute6dContactInequalities, crossMatrix
 from first_order_low_pass_filter import FirstOrderLowPassFilter
-from convex_hull_util import compute_convex_hull, plot_convex_hull
+#from convex_hull_util import compute_convex_hull, plot_convex_hull
 from geom_utils import plot_polytope
-from multi_contact.utils import compute_GIWC, compute_support_polygon
+#from multi_contact.utils import compute_GIWC, compute_support_polygon
 
 EPS = 1e-4;
     
@@ -26,7 +26,7 @@ class InvDynFormulation (object):
     USE_JOINT_VELOCITY_ESTIMATOR = False;
     BASE_VEL_FILTER_CUT_FREQ = 5;
     JOINT_VEL_ESTIMATOR_DELAY = 0.02;
-    COMPUTE_SUPPORT_POLYGON = True;
+    COMPUTE_SUPPORT_POLYGON = 0;
     
     ACCOUNT_FOR_ROTOR_INERTIAS = True;
     
@@ -347,6 +347,8 @@ class InvDynFormulation (object):
             self.B_sp = zeros((0,2));
             self.b_sp = zeros(0);
         else:
+            from convex_hull_util import compute_convex_hull, plot_convex_hull
+
             avg_z = np.mean(self.contact_points[2,:]);
             if(np.max(np.abs(self.contact_points[2,:] - avg_z)) < 1e-3):
                 ''' Contact points are coplanar so I can simply compute the convex hull of 
@@ -354,6 +356,7 @@ class InvDynFormulation (object):
                 (self.B_sp, self.b_sp) = compute_convex_hull(self.contact_points[:2,:].A);
             else:
                 try:
+                    from multi_contact.utils import compute_GIWC, compute_support_polygon
                     (H,h) = compute_GIWC(self.contact_points.T, self.contact_normals.T, mu_s);
                     (self.B_sp, self.b_sp) = compute_support_polygon(H, h, self.M[0,0], np.array([0.,0.,-9.81]), eliminate_redundancies=False);
                     self.B_sp *= -1.0;

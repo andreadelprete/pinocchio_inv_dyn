@@ -3,7 +3,7 @@ from numpy.linalg import norm
 from numpy.random import random
 from pinocchio_inv_dyn.robot_wrapper import RobotWrapper
 import pinocchio as se3
-from staggered_projections import StaggeredProjections
+#from staggered_projections import StaggeredProjections
 from constraint_violations import ForceConstraintViolation, PositionConstraintViolation, VelocityConstraintViolation, TorqueConstraintViolation, ConstraintViolationType
 from first_order_low_pass_filter import FirstOrderLowPassFilter
 import time
@@ -180,7 +180,7 @@ class Simulator (object):
         
         self.reset(0, q, v, dt);
         
-        self.LCP = StaggeredProjections(self.nv, self.mu[0], accuracy=EPS, verb=0);
+#        self.LCP = StaggeredProjections(self.nv, self.mu[0], accuracy=EPS, verb=0);
         
         if(self.DISPLAY_COM):
             self.viewer.addSphere('com', self.COM_SPHERE_RADIUS, zeros(3), zeros(3), self.COM_SPHERE_COLOR, 'OFF');
@@ -568,11 +568,12 @@ class Simulator (object):
             ind_vel = np.where(np.abs(self.v) > self.DQ_MAX)[0].squeeze();
             ind_vel = np.array([ind_vel]) if len(ind_vel.shape)==0 else ind_vel;
             for i in ind_vel:
-                res = res + [VelocityConstraintViolation(self.t, i-7, self.v[i], self.dv[i])];
+                print 'i=', i, ind_vel
+                res = res + [VelocityConstraintViolation(self.t, i-7, self.v[i,0], self.dv[i,0])];
                 if(self.verb>0):
                     print "[SIMULATOR] %s" % (res[-1].toString());
                 if(self.ENABLE_JOINT_LIMITS):
-                    self.v[i] = self.DQ_MAX if (self.v[i]>0.0) else -self.DQ_MAX;
+                    self.v[i,0] = self.DQ_MAX if (self.v[i,0]>0.0) else -self.DQ_MAX;
         
             ''' check for violations of joint position limits '''
             ind_pos_ub = (self.q[7:]>self.qMax[7:]).A.squeeze();

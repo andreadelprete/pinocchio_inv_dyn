@@ -6,12 +6,12 @@ Created on Tue May 19 14:23:37 2015
 """
 #from dynamic_graph.sot.dyninv.meta_task_dyn_6d import MetaTaskDyn6d
 import numpy as np
+from numpy import array
 from numpy.linalg import norm
 from math import sqrt, atan2, pi
 from pinocchio.rpy import rotate
 from pinocchio import Quaternion
 from pinocchio.utils import matrixToRpy, rpyToMatrix
-from polytope_conversion_utils import *
 from qpoases import PyQProblemB as QProblemB # QP with simple bounds only
 from qpoases import PySQProblem as SQProblem
 from qpoases import PyOptions as Options
@@ -188,6 +188,7 @@ def compute6dContactMap(contact_points, contact_normals, mu):
         H w <= 0 
 '''
 def compute6dContactInequalities(contact_points, contact_normals, mu):
+    from polytope_conversion_utils import cone_span_to_face
     ''' compute generators '''
     G_centr4 = compute6dContactMap(contact_points, contact_normals, mu);
     ''' convert generators to inequalities '''
@@ -200,6 +201,7 @@ def compute6dContactInequalities(contact_points, contact_normals, mu):
         H w <= 0 
 '''
 def computeRectangularContactInequalities(lxp, lxn, lyp, lyn, mu):
+    from polytope_conversion_utils import cone_span_to_face
     c = 4;              # number of contact points
     cg = 4;             # number of generators per contact point    
     G4 = np.zeros((3,cg));

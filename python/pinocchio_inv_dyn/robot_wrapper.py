@@ -92,7 +92,8 @@ class RobotWrapper(PinocchioRobotWrapper):
         dedicated call. Use only with update_geometry for prototyping.
     '''
     def frameJacobian(self, q, index, update_geometry=True, local_frame=True):
-        return se3.frameJacobian(self.model, self.data, q, index, local_frame, update_geometry)
+        return se3.frameJacobian(self.model, self.data, index, q)
+#        return se3.frameJacobian(self.model, self.data, q, index, local_frame, update_geometry)
         
     # Create the scene displaying the robot meshes in gepetto-viewer
     def loadDisplayModel(self, nodeName, windowName="pinocchio"):
