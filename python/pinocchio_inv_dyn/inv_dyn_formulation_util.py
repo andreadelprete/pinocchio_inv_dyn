@@ -26,7 +26,7 @@ class InvDynFormulation (object):
     USE_JOINT_VELOCITY_ESTIMATOR = False;
     BASE_VEL_FILTER_CUT_FREQ = 5;
     JOINT_VEL_ESTIMATOR_DELAY = 0.02;
-    COMPUTE_SUPPORT_POLYGON = 0;
+    COMPUTE_SUPPORT_POLYGON = 1;
     
     ACCOUNT_FOR_ROTOR_INERTIAS = True;
     
@@ -656,7 +656,7 @@ class InvDynFormulation (object):
     def createContactForceInequalities(self, fMin, mu, contact_points, contact_normals, oRi):
         if(contact_points.shape[1]>1):
             B = -1*compute6dContactInequalities(contact_points.T, contact_normals.T, mu[0]);
-            B[:,:3] = np.dot(B[:,:3], oRi.T);
+            B[:,:3] = np.dot(B[:,:3], oRi.T);   # contact forces are expressed in world frame
             B[:,3:] = np.dot(B[:,3:], oRi.T);
             b = zeros(B.shape[0]);
         elif(norm(contact_points)<EPS):
