@@ -15,10 +15,17 @@ import acc_bounds_util
 
 EPS = 1e-6;    # tolerance used to check violations
 
-''' Return True if the state is viable, False otherwise. '''
-def areStatesViable(q, dq, qMin, qMax, dqMax, ddqMax, verbose=False):
+
+def computeVelViabBounds(q, qMin, qMax, ddqMax):
     dqMaxViab =   np.sqrt(np.maximum(0.0, 2.0*np.multiply(ddqMax, qMax-q)));
     dqMinViab = - np.sqrt(np.maximum(0.0, 2.0*np.multiply(ddqMax, q-qMin)));
+    return (dqMinViab, dqMaxViab)
+    
+''' Return True if the state is viable, False otherwise. '''
+def areStatesViable(q, dq, qMin, qMax, dqMax, ddqMax, verbose=False):
+#    dqMaxViab =   np.sqrt(np.maximum(0.0, 2.0*np.multiply(ddqMax, qMax-q)));
+#    dqMinViab = - np.sqrt(np.maximum(0.0, 2.0*np.multiply(ddqMax, q-qMin)));
+    (dqMinViab, dqMaxViab) = computeVelViabBounds(q, qMin, qMax, ddqMax);
     
     ind_q       = np.logical_or(q<qMin-EPS, q>qMax+EPS);
     ind_dq      = np.logical_or(dq>dqMax+EPS, dq<-dqMax-EPS);    
@@ -36,7 +43,29 @@ def areStatesViable(q, dq, qMin, qMax, dqMax, ddqMax, verbose=False):
                 "qMax-q", qMax[ind_viab]-q[ind_viab], "q-qMin", q[ind_viab]-qMin[ind_viab], "dq", dq[ind_viab], \
                 "dqMaxViab", dqMaxViab[ind_viab], "dqMinViab", dqMinViab[ind_viab];
 
-    return np.logical_or(ind_q, np.logical_or(ind_dq, ind_viab));    
+    return np.logical_or(ind_q, np.logical_or(ind_dq, ind_viab));
+    
+''' Compute the minimum acceleration needed to stop before the position limits.
+    If the position limits are already violated it returns -1.
+'''
+def compute_min_ddq_stop(q, dq, qMin, qMax):
+    ddq_stop = np.matlib.zeros((q.shape[0],1)) -1.0;
+    ind_q = np.logical_and((q>qMin).A1, (q<qMax).A1);
+    ind   = np.logical_and(ind_q, (dq>0.0).A1);
+    nind  = np.logical_and(ind_q, (dq<=0.0).A1);
+    
+    ddq_stop[ind]  = np.divide(np.square(dq[ind]),  2*(qMax[ind] - q[ind]));
+    ddq_stop[nind] = np.divide(np.square(dq[nind]), 2*(q[nind] - qMin[nind]));
+    
+    return ddq_stop
+
+''' Compute the minimum position upper bound to stop with the given acceleration limits.
+'''
+def compute_min_q_upper_bound(q, dq, ddq_max):
+    q_max = np.matlib.zeros((q.shape[0],1)) + q;
+    ind   = (dq>0.0).A1;    
+    q_max[ind]  = q[ind] + np.divide(np.square(dq[ind]),  2.0*ddq_max[ind]);
+    return q_max
 
 ''' Compute acceleration limits imposed by position bounds.
 '''
@@ -161,8 +190,8 @@ def computeAccLimits(q, dq, qMin, qMax, dqMax, ddqMax, dt, verbose=True, ddqStop
                      IMPOSE_VELOCITY_BOUNDS=True, IMPOSE_VIABILITY_BOUNDS=True, IMPOSE_ACCELERATION_BOUNDS=True):    
     if(verbose):
         viabViol = areStatesViable(q, dq, qMin, qMax, dqMax, ddqMax, verbose);
-        if(np.sum(viabViol)>0):
-            print "WARNING: some states are not viable:", np.where(viabViol)[0];
+#        if(np.sum(viabViol)>0):
+#            print "WARNING: some states are not viable:", np.where(viabViol)[0];
         
     if(ddqStop is None):
         ddqStop=ddqMax;
@@ -193,7 +222,7 @@ def computeAccLimits(q, dq, qMin, qMax, dqMax, ddqMax, dt, verbose=True, ddqStop
     
     # Acceleration limits imposed by viability
     if(IMPOSE_VIABILITY_BOUNDS):
-        (ddqLB[:,2], ddqUB[:,2]) = computeAccLimitsFromViability(q, dq, qMin, qMax, ddqStop, dt, verbose);
+        (ddqLB[:,2], ddqUB[:,2]) = computeAccLimitsFromViability(q, dq, qMin, qMax, ddqStop, dt, False);
      
     # Acceleration limits
     if(IMPOSE_ACCELERATION_BOUNDS):
