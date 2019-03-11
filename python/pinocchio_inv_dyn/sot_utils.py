@@ -213,14 +213,14 @@ def computeRectangularContactInequalities(lxp, lxn, lyp, lyn, mu):
                [-lxn,  lyp, 0]]);
     ''' compute generators '''        
     muu = mu/sqrt(2);
-    G4[:,0] = np.array([ muu, muu, 1]);
-    G4[:,1] = np.array([ muu,-muu, 1]);
-    G4[:,2] = np.array([-muu, muu, 1]);
-    G4[:,3] = np.array([-muu,-muu, 1]);
-#    G4[:,0] = np.array([ mu, 0, 1]);
-#    G4[:,1] = np.array([-mu, 0, 1]);
-#    G4[:,2] = np.array([ 0, mu, 1]);
-#    G4[:,3] = np.array([ 0,-mu, 1]);
+#    G4[:,0] = np.array([ muu, muu, 1]);
+#    G4[:,1] = np.array([ muu,-muu, 1]);
+#    G4[:,2] = np.array([-muu, muu, 1]);
+#    G4[:,3] = np.array([-muu,-muu, 1]);
+    G4[:,0] = np.array([ mu, 0, 1]);
+    G4[:,1] = np.array([-mu, 0, 1]);
+    G4[:,2] = np.array([ 0, mu, 1]);
+    G4[:,3] = np.array([ 0,-mu, 1]);
     ''' project generators in 6d centroidal space '''
     for i in range(c):
         G_centr4[:3,cg*i:cg*i+cg] = G4;
