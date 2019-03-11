@@ -28,7 +28,8 @@ def xyzRpyToViewerConfig(xyz, rpy):
     R = se3.utils.rpyToMatrix(rpy);
     H = se3.SE3(R, xyz);
     pinocchioConf = se3.utils.se3ToXYZQUAT(H);
-    return se3.utils.XYZQUATToViewerConfiguration(pinocchioConf);
+#    return se3.utils.XYZQUATToViewerConfiguration(pinocchioConf);
+    return pinocchioConf;
     
 def viewerConfigToXyzRpy(viewerConf):
     xyzQuat = se3.utils.ViewerConfigurationToXYZQUAT(viewerConf);
@@ -61,9 +62,11 @@ class Viewer(object):
         self.filter = FirstOrderLowPassFilter(0.002, self.CAMERA_LOW_PASS_FILTER_CUT_FREQUENCY, mat_zeros(2));
         if(ENABLE_VIEWER):
             self.robot = robotWrapper;
-            self.robot.initDisplay("world/"+robotName, loadModel=False);
-            self.robot.loadDisplayModel("world/"+robotName, robotName);
+            self.robot.initDisplay(robotName, loadModel=False);
+            self.robot.loadDisplayModel(robotName) #, robotName);
             self.robot.viewer.gui.setLightingMode('world/floor', 'OFF');
+            self.robot.displayCollisions(False)
+            self.robot.displayVisuals(True)
             self.robots = {robotName: self.robot};
             
     def addViewerWindow(self, windowName):
